@@ -291,9 +291,9 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
     if not descripcion:
         descripcion = doc.get('Comments', '') or ''
     
-    # Truncar a 88 caracteres (lo que cabe en la celda del PDF)
-    if len(descripcion) > 88:
-        descripcion = descripcion[:85] + '...'
+    # Truncar a 85 caracteres (lo que cabe en la celda del PDF)
+    if len(descripcion) > 79:
+        descripcion = descripcion[:76] + '...'
     
     # Consecutivo FE - priorizar U_NVT_ConsecutivoFE sobre U_NUM_CONSE
     consecutivo = doc.get('U_NVT_ConsecutivoFE', '') or doc.get('U_NUM_CONSE', '') or ''
