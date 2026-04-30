@@ -269,14 +269,9 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
     lineas = doc.get('DocumentLines', [])
     
     if lineas:
-        # Tomar descripción de la primera línea o concatenar si son pocas
+        # Concatenar todas las descripciones separadas por " | "
         descripciones = [l.get('ItemDescription', '') for l in lineas if l.get('ItemDescription')]
-        if len(descripciones) == 1:
-            descripcion = descripciones[0]
-        elif len(descripciones) <= 3:
-            descripcion = ' | '.join(descripciones)
-        else:
-            descripcion = f"{descripciones[0]} (+{len(descripciones)-1} más)"
+        descripcion = ' | '.join(descripciones)
         
         # Extraer números de serie
         for linea in lineas:
@@ -296,6 +291,10 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
     if not descripcion:
         descripcion = doc.get('Comments', '') or ''
     
+    # Truncar a 88 caracteres (lo que cabe en la celda del PDF)
+    if len(descripcion) > 88:
+        descripcion = descripcion[:85] + '...'
+    
     # Consecutivo FE - priorizar U_NVT_ConsecutivoFE sobre U_NUM_CONSE
     consecutivo = doc.get('U_NVT_ConsecutivoFE', '') or doc.get('U_NUM_CONSE', '') or ''
     
@@ -305,7 +304,7 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
         'consecutivo_fe': consecutivo,
         'tipo_codigo': tipo_doc,
         'tipo_texto': traducir_tipo_documento(tipo_doc),
-        'descripcion': descripcion[:80] if descripcion else '',  # Limitar longitud
+        'descripcion': descripcion,
         'series': series,
         'fecha': str(doc.get('DocDate', ''))[:10],
         'fecha_vence': str(fecha_vence_str)[:10] if fecha_vence_str else '',
