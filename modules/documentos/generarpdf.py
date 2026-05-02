@@ -68,7 +68,7 @@ def generar_qr_validacion(datos_cliente: Dict, docs_usd: List, docs_crc: List, t
     
     # Construir contenido del QR
     contenido = []
-    contenido.append("═════════════════════════════")
+    contenido.append("══════════════════════════════════════════════════════════")
     contenido.append("   QUÍMICAS UNIDAS S.A.")
     contenido.append("   Estado de Cuenta")
     contenido.append("═════════════════════════════")
@@ -97,12 +97,12 @@ def generar_qr_validacion(datos_cliente: Dict, docs_usd: List, docs_crc: List, t
         contenido.append(f"  Total: CRC {formato_latino(total_crc)}")
         contenido.append("")
     
-    contenido.append("═════════════════════════════")
+    contenido.append("══════════════════════════════════════════════════════════")
     contenido.append("Crédito y Cobro:")
     contenido.append("Tel: 2257-8484 ext. 216-217")
     contenido.append("credito@qu.cr")
     contenido.append("creditodenis@qu.cr")
-    contenido.append("═════════════════════════════")
+    contenido.append("══════════════════════════════════════════════════════════")
     contenido.append("")
     contenido.append(f"Verificación: {codigo_verificacion}")
     
@@ -180,7 +180,7 @@ class PDFEstadoCuenta(FPDF):
         
         # Línea decorativa
         self.set_draw_color(*AZUL_CLARO)
-        self.set_line_width(0.8)
+        self.set_line_width(0.99)
         self.line(10, 40, self.w - 10, 40)
         
         self.set_y(43)
