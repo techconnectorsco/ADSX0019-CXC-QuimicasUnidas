@@ -19,11 +19,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from modules.database.conexion import ServiceLayerConnection
 from modules.documentos.generarpdf import generar_pdf_estado_cuenta
+from sendemailCXC import enviar_estado_cuenta
 
 
 # =============================================================================
 # CONSTANTES
 # =============================================================================
+
+# Email para pruebas (comentar en producción)
+EMAIL_PRUEBA = "devs@techconnectors.co"
+MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al cliente real
 
 # Tipos de documento que RESTAN al saldo (pagos, notas de crédito)
 TIPOS_QUE_RESTAN = {'DEP', 'N', 'N/C', 'NC', 'REC', 'TEF', 'O/C', 'RC', 'PR', 'REM', 'NCM'}
@@ -116,7 +121,7 @@ def obtener_clientes_con_saldo(conn: ServiceLayerConnection, limite: int = None)
     """
     params = {
         "$filter": "CardType eq 'cCustomer' and Valid eq 'tYES' and CurrentAccountBalance ne 0",
-        "$select": "CardCode,CardName,EmailAddress,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,U_NVT_CorreoEstadoCuenta,U_NTV_EnvioAutomatico,CreditLimit,ContactPerson,Address,PayTermsGrpCode",
+        "$select": "CardCode,CardName,EmailAddress,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,U_NVT_CorreoEstadoCuenta,U_NTV_EnvioAutomatico,CreditLimit,ContactPerson,Address,PayTermsGrpCode,FreeText",
     }
     
     if limite:
@@ -331,20 +336,94 @@ def separar_por_moneda(documentos: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
     return colones, dolares
 
 
-def determinar_correo_cliente(cliente: Dict) -> Optional[str]:
+def extraer_correos_de_texto(texto: str) -> List[str]:
     """
-    Determina qué correo usar para enviar el estado de cuenta.
-    Prioridad: U_NVT_CorreoEstadoCuenta > EmailAddress
+    Extrae correos electrónicos de un texto usando regex.
+    Útil para extraer correos del campo FreeText/comentarios.
     """
-    correo_cxc = cliente.get('U_NVT_CorreoEstadoCuenta')
+    import re
+    
+    if not texto:
+        return []
+    
+    patron = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    correos = re.findall(patron, texto)
+    
+    # Limpiar, convertir a minúsculas y eliminar duplicados
+    return list(set([c.lower().strip() for c in correos if c]))
+
+
+def parsear_correos_campo(valor: str) -> List[str]:
+    """
+    Parsea un campo que puede tener múltiples correos separados por:
+    coma, punto y coma, o espacio.
+    """
+    if not valor:
+        return []
+    
+    # Reemplazar separadores por coma
+    valor = valor.replace(';', ',').replace(' ', ',')
+    
+    # Separar y limpiar
+    correos = []
+    for parte in valor.split(','):
+        parte = parte.strip().lower()
+        if '@' in parte and '.' in parte:
+            correos.append(parte)
+    
+    return list(set(correos))
+
+
+def determinar_correos_cliente(cliente: Dict) -> List[str]:
+    """
+    Determina los correos para enviar el estado de cuenta.
+    
+    Prioridad:
+    1. U_NVT_CorreoEstadoCuenta (puede tener múltiples)
+    2. FreeText/comentarios (extraer con regex)
+    3. EmailAddress (correo principal)
+    
+    Returns:
+        Lista de correos únicos
+    """
+    correos = []
+    
+    # 1. Campo específico para CXC (prioridad máxima)
+    correo_cxc = cliente.get('U_NVT_CorreoEstadoCuenta', '')
     if correo_cxc and correo_cxc.strip():
-        return correo_cxc.strip()
+        correos.extend(parsear_correos_campo(correo_cxc))
     
-    correo_principal = cliente.get('EmailAddress')
-    if correo_principal and correo_principal.strip():
-        return correo_principal.strip()
+    # 2. Si no hay en campo CXC, buscar en comentarios/FreeText
+    if not correos:
+        notas = cliente.get('FreeText', '') or ''
+        correos_notas = extraer_correos_de_texto(notas)
+        if correos_notas:
+            correos.extend(correos_notas)
     
-    return None
+    # 3. Si aún no hay, usar correo principal
+    if not correos:
+        correo_principal = cliente.get('EmailAddress', '')
+        if correo_principal and correo_principal.strip():
+            correos.append(correo_principal.strip().lower())
+    
+    # Eliminar duplicados y retornar
+    return list(set(correos))
+
+
+def cliente_permite_envio(cliente: Dict) -> bool:
+    """
+    Verifica si el cliente tiene habilitado el envío automático.
+    
+    NOTA: Actualmente todos están en 'N'. 
+    Mientras se configura, esta función retorna True para todos.
+    Cuando esté listo, descomentar la validación.
+    """
+    # TODO: Activar validación cuando los operadores configuren los clientes
+    # envio_auto = cliente.get('U_NTV_EnvioAutomatico', '')
+    # return envio_auto.upper() == 'S'
+    
+    # Por ahora, permitir a todos (modo desarrollo)
+    return True
 
 
 def calcular_rangos_vencimiento(documentos: List[Dict]) -> Dict:
@@ -410,21 +489,23 @@ def preparar_datos_cliente(conn: ServiceLayerConnection, cliente: Dict) -> Dict:
     # Calcular rangos de vencimiento
     rangos = calcular_rangos_vencimiento(documentos)
     
-    # Determinar correo
-    correo = determinar_correo_cliente(cliente)
+    # Determinar correos (puede ser múltiples)
+    correos = determinar_correos_cliente(cliente)
     
     return {
         'cliente': {
             'codigo': card_code,
             'nombre': cliente.get('CardName', ''),
             'telefono': cliente.get('Phone1', '') or cliente.get('Phone2', '') or cliente.get('Cellular', ''),
-            'correo': correo,
+            'correos': correos,  # Lista de correos
+            'correo': correos[0] if correos else None,  # Primer correo (compatibilidad)
             'direccion': cliente.get('Address', ''),
             'contacto': contacto.get('nombre', ''),
             'vendedor': vendedor,
             'condicion_pago': condicion_pago,
             'limite_credito': cliente.get('CreditLimit', 0) or 0,
             'saldo_total': cliente.get('CurrentAccountBalance', 0) or 0,
+            'envio_automatico': cliente.get('U_NTV_EnvioAutomatico', ''),
         },
         'documentos': {
             'colones': doc_colones,
@@ -470,8 +551,8 @@ def ejecutar_proceso_cxc():
         # DESARROLLO: Limitar a 2 clientes para pruebas
         # PRODUCCIÓN: Comentar o eliminar la siguiente línea
         # =====================================================================
-        clientes = clientes[:2]
-        #print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
+        clientes = clientes[:3]
+        print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
         # =====================================================================
         
         if not clientes:
@@ -492,6 +573,11 @@ def ejecutar_proceso_cxc():
             
             print(f"\n[{i}/{len(clientes)}] {card_code} - {card_name}")
             
+            # Verificar si permite envío automático
+            if not cliente_permite_envio(cliente):
+                print(f"   ⏭️ Envío automático deshabilitado")
+                continue
+            
             # Preparar datos del cliente
             datos = preparar_datos_cliente(conn, cliente)
             
@@ -503,9 +589,9 @@ def ejecutar_proceso_cxc():
             
             resultados['procesados'] += 1
             
-            # Verificar correo
-            correo = datos['cliente']['correo']
-            if not correo:
+            # Verificar correos
+            correos = datos['cliente']['correos']
+            if not correos:
                 print(f"   ⚠️ Sin correo electrónico")
                 resultados['sin_correo'] += 1
                 continue
@@ -516,7 +602,7 @@ def ejecutar_proceso_cxc():
                 print(f"   Total USD: ${datos['totales']['dolares']:,.2f}")
             if datos['totales']['colones'] != 0:
                 print(f"   Total CRC: ₡{datos['totales']['colones']:,.2f}")
-            print(f"   Correo: {correo}")
+            print(f"   Correo(s): {', '.join(correos)}")
             
             # Generar PDF
             try:
@@ -527,12 +613,30 @@ def ejecutar_proceso_cxc():
                 resultados['errores'] += 1
                 continue
             
-            # TODO: Enviar correo
-            # enviado = enviar_estado_cuenta(correo, pdf_path, datos)
-            # if enviado:
-            #     resultados['enviados'] += 1
-            # else:
-            #     resultados['errores'] += 1
+            # Enviar correo
+            # En modo prueba, envía a EMAIL_PRUEBA
+            # En producción, envía a los correos reales del cliente
+            if MODO_PRUEBA:
+                destinatarios = [EMAIL_PRUEBA]
+                print(f"   📧 MODO PRUEBA: Enviando a {EMAIL_PRUEBA} (en vez de {', '.join(correos)})")
+            else:
+                destinatarios = correos
+            
+            try:
+                enviado = enviar_estado_cuenta(
+                    destinatarios=destinatarios,
+                    nombre_cliente=datos['cliente']['nombre'],
+                    codigo_cliente=datos['cliente']['codigo'],
+                    ruta_pdf=pdf_path,
+                    datos=datos
+                )
+                if enviado:
+                    resultados['enviados'] += 1
+                else:
+                    resultados['errores'] += 1
+            except Exception as e:
+                print(f"   ❌ Error enviando correo: {str(e)}")
+                resultados['errores'] += 1
         
         # 3. Resumen final
         print("\n" + "="*80)
