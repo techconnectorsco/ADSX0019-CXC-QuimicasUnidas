@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from modules.database.conexion import ServiceLayerConnection
 from agentepdf import generar_pdf_reporte_gira
+from sendemailCXC import EmailSenderAgente
 
 # =============================================================================
 # CONSTANTES
@@ -282,8 +283,13 @@ def ejecutar_reportes_gira():
             
         print(f"   Se identificaron {len(agrupados_por_agente)} agentes con cobros pendientes.")
         
+        # ================================================================
+        # IMPORTANTE: Inicializar la clase que envía los correos
+        # ================================================================
+        sender = EmailSenderAgente()
+        
         # 4. Procesar y generar documento por cada Agente
-        resultados = {'procesados': 0, 'enviados': 0, 'errores': 0}
+        resultados = {'procesados': 0, 'enviados': 0, 'errores': 0, 'sin_correo': 0}
         
         for vendedor_id, clientes_del_agente in agrupados_por_agente.items():
             info_vendedor = vendedores_cache.get(vendedor_id, {'nombre': 'No Asignado', 'correo': ''})
@@ -291,6 +297,7 @@ def ejecutar_reportes_gira():
             correo_agente = info_vendedor['correo']
             
             print(f"\n👨‍💼 Procesando Agente: {nombre_agente} (ID: {vendedor_id})")
+            
             # ================================================================
             # NUEVO: Ordenar los clientes del agente por ZONA y luego por Nombre
             # ================================================================
@@ -346,25 +353,44 @@ def ejecutar_reportes_gira():
                 pdf_path = generar_pdf_reporte_gira(datos_reporte)
                 print(f"   📄 PDF Generado: {pdf_path}")
                 
-                # TODO: Módulo de envío de correo al agente. 
-                # Se puede utilizar una variante de sendemailCXC apuntando a 'correo_agente'
-                # destinatario = EMAIL_PRUEBA if MODO_PRUEBA else correo_agente
-                # enviar_reporte_agente(destinatario, pdf_path, nombre_agente)
-                # resultados['enviados'] += 1
+                # 2. Determinar destinatario según MODO_PRUEBA
+                correo_sap = info_vendedor.get('correo', '')
+                
+                if MODO_PRUEBA:
+                    destinatario = EMAIL_PRUEBA
+                    print(f"   📧 MODO PRUEBA: Direccionando a {EMAIL_PRUEBA} (En SAP: '{correo_sap or 'VACÍO'}')")
+                else:
+                    destinatario = correo_sap
+                
+                # 3. Validar y Enviar
+                if not destinatario or "@" not in str(destinatario):
+                    print(f"   ⚠️ Agente {nombre_agente} no tiene correo asignado. Saltando envío.")
+                    resultados['sin_correo'] += 1
+                    continue
+
+                exito = sender.enviar_reporte_gira(destinatario, nombre_agente, pdf_path)
+                
+                if exito:
+                    print(f"   ✅ Reporte enviado con éxito.")
+                    resultados['enviados'] += 1
+                else:
+                    print(f"   ❌ Error al enviar el correo vía Graph API.")
+                    resultados['errores'] += 1
                 
             except Exception as e:
-                print(f"   ❌ Error generando PDF para agente: {str(e)}")
+                print(f"   ❌ Error procesando agente {nombre_agente}: {str(e)}")
                 resultados['errores'] += 1
-                
+                    
         # 5. Resumen final
         print("\n" + "="*80)
         print("📊 RESUMEN DEL PROCESO DE GIRAS")
         print("="*80)
         print(f"   Agentes procesados: {resultados['procesados']}")
-        print(f"   Errores de generación: {resultados['errores']}")
-        # print(f"   Reportes enviados: {resultados['enviados']}")
+        print(f"   Reportes enviados: {resultados['enviados']}")
+        print(f"   Agentes sin correo: {resultados['sin_correo']}")
+        print(f"   Errores de generación/envío: {resultados['errores']}")
         print("="*80)
-
+        
     finally:
         conn.logout()
 

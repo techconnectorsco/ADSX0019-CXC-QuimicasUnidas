@@ -516,3 +516,94 @@ def enviar_estado_cuenta(
     except Exception as e:
         print(f"   ❌ Error: {e}")
         return False
+
+
+# =============================================================================
+# PLANTILLA HTML PARA AGENTES
+# =============================================================================
+
+def get_agent_email_html(nombre_agente: str, fecha: str) -> str:
+    """Genera el HTML para el correo que recibe el agente."""
+    return f"""
+    <html>
+    <body style="font-family: 'Segoe UI', Arial, sans-serif; color: #333; line-height: 1.6;">
+        <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+            <div style="background-color: #475da4; color: white; padding: 20px; text-align: center;">
+                <h2 style="margin: 0;">Reporte de Gira y Cobro</h2>
+            </div>
+            <div style="padding: 25px;">
+                <p>Hola <strong>{nombre_agente}</strong>,</p>
+                <p>Se adjunta el reporte consolidado de clientes con saldos pendientes para su gestión de cobro en campo.</p>
+                <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; border-left: 4px solid #28a0cc;">
+                    <p style="margin: 0;"><strong>Fecha de Generación:</strong> {fecha}</p>
+                    <p style="margin: 5px 0 0 0;"><strong>Contenido:</strong> Detalle de facturas por cliente y zona.</p>
+                </div>
+                <p style="margin-top: 20px;">Por favor, utiliza este documento para coordinar las visitas y reportar cualquier gestión al departamento de Crédito.</p>
+            </div>
+            <div style="background-color: #f4f4f4; color: #777; padding: 15px; text-align: center; font-size: 12px;">
+                Este es un envío automático del Sistema RPA - Químicas Unidas S.A.
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+# =============================================================================
+# CLASE PARA ENVÍO A AGENTES
+# =============================================================================
+
+class EmailSenderAgente(EmailSenderCXC):
+    """
+    Hereda de EmailSenderCXC para reutilizar la autenticación de Graph API,
+    pero especializada en reportes de gira.
+    """
+    
+    def enviar_reporte_gira(self, destinatario: str, nombre_agente: str, ruta_pdf: str) -> bool:
+        """Envía el PDF consolidado al agente."""
+        if not destinatario or "@" not in destinatario:
+            print(f"   ⚠️ Agente {nombre_agente} sin correo válido. No se puede enviar.")
+            return False
+
+        if not self.token:
+            self.get_access_token()
+
+        fecha_str = datetime.now().strftime("%d/%m/%Y")
+        body_html = get_agent_email_html(nombre_agente, fecha_str)
+
+        message = {
+            "subject": f"Reporte de Gira - Cobros - {nombre_agente} - {fecha_str}",
+            "body": {"contentType": "HTML", "content": body_html},
+            "toRecipients": [{"emailAddress": {"address": destinatario.strip()}}],
+            "attachments": []
+        }
+
+        # Adjuntar PDF
+        try:
+            with open(ruta_pdf, 'rb') as f:
+                import base64
+                pdf_b64 = base64.b64encode(f.read()).decode('utf-8')
+                
+            message["attachments"].append({
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": os.path.basename(ruta_pdf),
+                "contentType": "application/pdf",
+                "contentBytes": pdf_b64
+            })
+        except Exception as e:
+            print(f"   ❌ Error adjuntando PDF al reporte: {e}")
+            return False
+
+        url = f"https://graph.microsoft.com/v1.0/users/{self.sender_email}/sendMail"
+        headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
+        
+        response = requests.post(url, headers=headers, json={"message": message})
+        return response.status_code == 202
+
+# Función de conveniencia (similar a la de CXC)
+def enviar_email_agente(destinatario: str, nombre_agente: str, ruta_pdf: str) -> bool:
+    try:
+        sender = EmailSenderAgente()
+        return sender.enviar_reporte_gira(destinatario, nombre_agente, ruta_pdf)
+    except Exception as e:
+        print(f"   ❌ Error en enviar_email_agente: {e}")
+        return False
