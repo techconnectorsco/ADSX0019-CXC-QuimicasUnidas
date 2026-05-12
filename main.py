@@ -628,7 +628,7 @@ def ejecutar_proceso_cxc():
         # DESARROLLO: Limitar a 2 clientes para pruebas
         # PRODUCCIÓN: Comentar o eliminar la siguiente línea
         # =====================================================================
-        clientes = clientes[:2]
+        clientes = clientes[:4]
         print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
         # =====================================================================
 
