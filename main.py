@@ -21,6 +21,7 @@ from modules.database.conexion import ServiceLayerConnection
 from modules.documentos.generarpdf import generar_pdf_estado_cuenta
 from sendemailCXC import enviar_estado_cuenta
 from logcontrolcxc import ControlCXC
+from Generarexcel import generar_excel_estado_cuenta
 
 # =============================================================================
 # CONSTANTES
@@ -156,19 +157,21 @@ def obtener_clientes_con_saldo(
         return obtener_todos_paginado(conn, "BusinessPartners", params, "CardCode")
 
 
-def obtener_condicion_pago(conn: ServiceLayerConnection, pay_terms_code: int) -> str:
-    """Obtiene la descripción de la condición de pago."""
+def obtener_condicion_pago(conn: ServiceLayerConnection, pay_terms_code: int) -> tuple:
+    """Obtiene la descripción de la condición de pago y los días."""
     if not pay_terms_code:
-        return "No especificado"
+        return "No especificado", 30
 
     try:
         resultado = conn.get(f"PaymentTermsTypes({pay_terms_code})")
         if resultado:
-            return resultado.get("PaymentTermsGroupName", "No especificado")
+            nombre = resultado.get("PaymentTermsGroupName", "No especificado")
+            dias = int(resultado.get("NumberOfDaysForPayment", 30))
+            return nombre, dias
     except:
         pass
 
-    return "No especificado"
+    return "No especificado", 30
 
 
 def obtener_nombre_vendedor(
@@ -535,7 +538,9 @@ def preparar_datos_cliente(conn: ServiceLayerConnection, cliente: Dict) -> Dict:
     card_code = cliente.get("CardCode")
 
     # Obtener información adicional
-    condicion_pago = obtener_condicion_pago(conn, cliente.get("PayTermsGrpCode"))
+    condicion_pago, plazo_dias = obtener_condicion_pago(
+        conn, cliente.get("PayTermsGrpCode")
+    )
     vendedor = obtener_nombre_vendedor(conn, cliente.get("SalesPersonCode"))
     contacto = obtener_contacto_principal(conn, card_code, cliente.get("ContactPerson"))
 
@@ -568,6 +573,7 @@ def preparar_datos_cliente(conn: ServiceLayerConnection, cliente: Dict) -> Dict:
             "contacto": contacto.get("nombre", ""),
             "vendedor": vendedor,
             "condicion_pago": condicion_pago,
+            "plazo_dias": plazo_dias,
             "limite_credito": cliente.get("CreditLimit", 0) or 0,
             "saldo_total": cliente.get("CurrentAccountBalance", 0) or 0,
             "envio_automatico": cliente.get("U_NTV_EnvioAutomatico", ""),
@@ -622,7 +628,7 @@ def ejecutar_proceso_cxc():
         # DESARROLLO: Limitar a 2 clientes para pruebas
         # PRODUCCIÓN: Comentar o eliminar la siguiente línea
         # =====================================================================
-        clientes = clientes[:20]
+        clientes = clientes[:2]
         print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
         # =====================================================================
 
@@ -725,6 +731,15 @@ def ejecutar_proceso_cxc():
                 pdf_path = generar_pdf_estado_cuenta(datos)
                 print(f"   ✅ PDF generado: {pdf_path}")
                 pdf_generado = True
+
+                # Generar Excel (mismo datos)
+                excel_path = None
+                try:
+                    excel_path = generar_excel_estado_cuenta(datos)
+                    print(f"   ✅ Excel generado: {excel_path}")
+                except Exception as e:
+                    print(f"   ⚠️ Error generando Excel: {str(e)}")
+                    # No es crítico, continúa con el PDF
             except Exception as e:
                 print(f"   ❌ Error generando PDF: {str(e)}")
                 resultados["errores"] += 1
@@ -757,7 +772,7 @@ def ejecutar_proceso_cxc():
 
             try:
                 # Obtener el plazo dinámico (PayTermsGrpCode se convierte en días)
-                plazo_dias = cliente.get("PayTermsGrpCode", 30) or 30
+                plazo_dias = datos["cliente"]["plazo_dias"]
 
                 enviado = enviar_estado_cuenta(
                     destinatarios=destinatarios,
@@ -766,6 +781,7 @@ def ejecutar_proceso_cxc():
                     ruta_pdf=pdf_path,
                     datos=datos,
                     plazo_dias=plazo_dias,
+                    ruta_excel=excel_path,
                 )
                 if enviado:
                     resultados["enviados"] += 1
@@ -781,7 +797,7 @@ def ejecutar_proceso_cxc():
                         vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
                         pdf_generado=pdf_generado,
                         email_status="enviado",
-                        observacion="Enviado OK",
+                        observacion="PDF + Excel enviados OK",
                     )
                 else:
                     resultados["errores"] += 1

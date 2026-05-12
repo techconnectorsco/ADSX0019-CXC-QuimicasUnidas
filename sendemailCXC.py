@@ -216,7 +216,7 @@ def get_email_html(
 
             <div class="footer">
                 <p>Este es un correo automático generado por el sistema de gestión de cobros.</p>
-                <p>© {datetime.now().year} Químicas Unidas S.A. - Todos los derechos reservados</p>
+                <p>© {datetime.now().year} Químicas Unidas Ltda. - Todos los derechos reservados</p>
             </div>
         </div>
     </body>
@@ -275,6 +275,7 @@ class EmailSenderCXC:
         datos: Dict = None,
         cc_email: str = None,
         plazo_dias: int = 30,
+        ruta_excel: str = None,
     ) -> bool:
         """
         Envía el estado de cuenta por correo.
@@ -363,6 +364,24 @@ class EmailSenderCXC:
             print(f"   ❌ Error leyendo PDF: {e}")
             return False
 
+        if ruta_excel and os.path.exists(ruta_excel):
+            try:
+                with open(ruta_excel, "rb") as f:
+                    excel_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                excel_filename = os.path.basename(ruta_excel)
+                message["attachments"].append(
+                    {
+                        "@odata.type": "#microsoft.graph.fileAttachment",
+                        "name": excel_filename,
+                        "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "contentBytes": excel_b64,
+                    }
+                )
+            except Exception as e:
+                print(f"   ⚠️ Error adjuntando Excel: {e}")
+                # No es crítico, continúa sin Excel
+
         # Enviar correo
         email_msg = {"message": message, "saveToSentItems": "true"}
 
@@ -436,7 +455,7 @@ class EmailSenderCXC:
             <body style="font-family: 'Segoe UI', Arial, sans-serif; color: #333; background-color: #f4f4f4; margin: 0; padding: 0;">
                 <div style="max-width: 700px; margin: 20px auto; background-color: #fff; padding: 30px; border-radius: 10px; box-shadow: 0px 4px 12px rgba(0,0,0,0.1);">
                     <div style="text-align: center; padding-bottom: 20px; border-bottom: 3px solid #28a0cc; margin-bottom: 25px;">
-                        <h1 style="color: #475da4; margin: 0;">Quimicas Unidas S.A.</h1>
+                        <h1 style="color: #475da4; margin: 0;">Quimicas Unidas Ltda.</h1>
                         <h2 style="color: #666; font-weight: normal; margin: 5px 0 0 0;">Log de Control - Estados de Cuenta</h2>
                     </div>
                     
@@ -456,7 +475,7 @@ class EmailSenderCXC:
                     
                     <div style="text-align: center; font-size: 12px; color: #666; margin-top: 25px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
                         <p>Este es un correo automatico - Sistema RPA</p>
-                        <p>Quimicas Unidas S.A. - Departamento de Credito y Cobro</p>
+                        <p>Quimicas Unidas Ltda. - Departamento de Credito y Cobro</p>
                     </div>
                 </div>
             </body>
@@ -536,6 +555,7 @@ def enviar_estado_cuenta(
     ruta_pdf: str,
     datos: Dict = None,
     plazo_dias: int = 30,
+    ruta_excel: str = None,
 ) -> bool:
     try:
         sender = EmailSenderCXC()
@@ -546,6 +566,7 @@ def enviar_estado_cuenta(
             ruta_pdf=ruta_pdf,
             datos=datos,
             plazo_dias=plazo_dias,
+            ruta_excel=ruta_excel,
         )
     except Exception as e:
         print(f"   ❌ Error: {e}")
@@ -576,7 +597,7 @@ def get_agent_email_html(nombre_agente: str, fecha: str) -> str:
                 <p style="margin-top: 20px;">Por favor, utiliza este documento para coordinar las visitas y reportar cualquier gestión al departamento de Crédito.</p>
             </div>
             <div style="background-color: #f4f4f4; color: #777; padding: 15px; text-align: center; font-size: 12px;">
-                Este es un envío automático del Sistema RPA - Químicas Unidas S.A.
+                Este es un envío automático del Sistema RPA - Químicas Unidas Ltda.
             </div>
         </div>
     </body>
