@@ -5,9 +5,10 @@ Generación de PDFs consolidados para Reportes de Gira de Agentes.
 Características:
 - Orientación horizontal tamaño OFICIO (Legal)
 - Múltiples clientes en un solo documento
-- Separadores visuales por cliente con información de contacto
-- Columnas idénticas al Estado de Cuenta de CXC (sin tabla de vencidos)
+- Separadores visuales por cliente con plazo, descuento y grupo
+- Columnas: No Doc, O/C, Fecha Fac, Fecha Vence, Trans, Descripción, Monto, Plazo, Desc%, Días
 - Formato de moneda Latinoamericano
+- Documentos ordenados: Vencidos USD → Al día USD → Vencidos CRC → Al día CRC
 """
 
 from fpdf import FPDF
@@ -27,14 +28,14 @@ except ImportError:
 # CONSTANTES Y CONFIGURACIÓN DE COLORES
 # =============================================================================
 
-AZUL_OSCURO = (11, 17, 75)  # Header, títulos
-AZUL_CLARO = (40, 143, 204)  # Línea decorativa
-AZUL_FOOTER = (71, 93, 164)  # Fondo footer
-ROJO = (220, 53, 69)  # Vencidos
-VERDE = (40, 167, 69)  # Al día
-GRIS = (100, 100, 100)  # Textos secundarios
-GRIS_CLARO = (245, 245, 245)  # Fondo alternado
-AMARILLO_SUAVE = (255, 249, 230)  # Fondo para encabezado de cliente
+AZUL_OSCURO = (11, 17, 75)
+AZUL_CLARO = (40, 143, 204)
+AZUL_FOOTER = (71, 93, 164)
+ROJO = (220, 53, 69)
+VERDE = (40, 167, 69)
+GRIS = (100, 100, 100)
+GRIS_CLARO = (245, 245, 245)
+AMARILLO_SUAVE = (255, 249, 230)
 
 # =============================================================================
 # FUNCIONES AUXILIARES
@@ -118,11 +119,9 @@ class PDFReporteGira(FPDF):
         self.qr_path = qr_path
 
     def header(self):
-        # Logo
         if self.logo_path and os.path.exists(self.logo_path):
             self.image(self.logo_path, 15, 8, 45)
 
-        # Título centrado
         self.set_font("Arial", "B", 18)
         self.set_text_color(*AZUL_FOOTER)
         self.set_y(12)
@@ -131,21 +130,18 @@ class PDFReporteGira(FPDF):
         self.set_font("Arial", "B", 15)
         self.cell(0, 6, "Reporte de Gira - Gestión de Cobro", 0, 1, "C")
 
-        # Fecha y hora
         self.set_font("Arial", "", 10)
         self.set_text_color(*GRIS)
         fecha = datetime.now().strftime("%d/%m/%Y")
-        hora = datetime.now().strftime("%I:%M %p")
+        hora = datetime.now().strftime("%H:%M")
         self.set_xy(-95, 12)
         self.cell(50, 5, f"Fecha: {fecha}", 0, 1, "R")
         self.set_xy(-95, 17)
         self.cell(50, 5, f"Hora: {hora}", 0, 1, "R")
 
-        # QR
         if self.qr_path and os.path.exists(self.qr_path):
             self.image(self.qr_path, self.w - 38, 5, 30)
 
-        # Línea decorativa
         self.set_draw_color(*AZUL_CLARO)
         self.set_line_width(0.99)
         self.line(10, 40, self.w - 10, 40)
@@ -200,16 +196,15 @@ class PDFReporteGira(FPDF):
         self.ln(3)
 
     def agregar_separador_cliente(self, cliente: Dict, totales: Dict):
-        """Franja que separa y muestra la info de contacto de un cliente antes de sus facturas."""
-        # Evitar que el separador quede viudo al final de la página
+        """Separador visual con info del cliente incluyendo plazo, descuento y grupo."""
         if self.get_y() > self.h - 50:
             self.add_page()
 
         y_inicio = self.get_y()
         self.set_fill_color(*AMARILLO_SUAVE)
-        self.rect(10, y_inicio, self.w - 20, 16, "F")
+        self.rect(10, y_inicio, self.w - 20, 20, "F")
         self.set_fill_color(*AZUL_CLARO)
-        self.rect(10, y_inicio, 3, 16, "F")
+        self.rect(10, y_inicio, 3, 20, "F")
 
         self.set_xy(15, y_inicio + 2)
         self.set_font("Arial", "B", 11)
@@ -217,9 +212,9 @@ class PDFReporteGira(FPDF):
 
         # Fila 1: Cliente y Deuda Total
         nombre_str = f"{cliente.get('codigo', '')} - {cliente.get('nombre', '')}"
-        self.cell(160, 6, nombre_str[:80], 0, 0)
+        self.cell(140, 6, nombre_str[:70], 0, 0)
 
-        deuda_str = "SALDO TOTAL:"
+        deuda_str = "SALDO:"
         if totales.get("dolares", 0) > 0:
             deuda_str += f" USD {formato_latino(totales['dolares'])} |"
         if totales.get("colones", 0) > 0:
@@ -229,24 +224,66 @@ class PDFReporteGira(FPDF):
         self.set_text_color(*ROJO)
         self.cell(0, 6, deuda_str, 0, 1, "R")
 
-        # Fila 2: Contacto
+        # Fila 2: Contacto y Datos Comerciales
         self.set_x(15)
         self.set_font("Arial", "", 9)
         self.set_text_color(0, 0, 0)
-        contacto_str = f"Tel: {cliente.get('telefono', 'N/A')} | Contacto: {cliente.get('contacto', 'N/A')} | Límite: CRC {formato_latino(cliente.get('limite_credito', 0))}"
-        self.cell(160, 5, contacto_str, 0, 0)
 
+        plazo = cliente.get("plazo_dias", 30)
+        descuento = cliente.get("descuento_porcent", 0)
+        grupo = cliente.get("grupo_descuento", -1)
+
+        contacto_str = (
+            f"Tel: {cliente.get('telefono', 'N/A')} | {cliente.get('contacto', 'N/A')}"
+        )
+        self.cell(100, 5, contacto_str, 0, 0)
+
+        self.set_font("Arial", "B", 8)
+        self.cell(
+            0, 5, f"Plazo: {plazo}d | Desc: {descuento}% | Grp: {grupo}", 0, 1, "R"
+        )
+
+        # Fila 3: Dirección y Límite
+        self.set_x(15)
         self.set_font("Arial", "I", 8)
-        self.cell(0, 5, f"Dir: {str(cliente.get('direccion', ''))[:90]}", 0, 1, "R")
+        self.set_text_color(GRIS[0], GRIS[1], GRIS[2])
+        dir_str = f"Dir: {str(cliente.get('direccion', ''))[:80]}"
+        self.cell(140, 5, dir_str, 0, 0)
+
+        self.set_font("Arial", "", 8)
+        self.cell(
+            0,
+            5,
+            f"Límite: CRC {formato_latino(cliente.get('limite_credito', 0))}",
+            0,
+            1,
+            "R",
+        )
+
         self.ln(2)
 
     def agregar_tabla_documentos(self, docs_usd: List[Dict], docs_crc: List[Dict]):
-        """Tabla de facturas idéntica a la de CXC, pero sin totales por tabla."""
+        """Tabla con columnas: No Doc, O/C, Fac, Vence, T, Descripción, Monto, Días."""
+        # Combinar documentos
         todos_docs = []
-        if docs_usd:
-            todos_docs.extend(docs_usd)
-        if docs_crc:
-            todos_docs.extend(docs_crc)
+
+        # Vencidos USD primero
+        vencidos_usd = [d for d in docs_usd if d.get("esta_vencido", False)]
+        vencidos_usd.sort(key=lambda x: x.get("dias_vencido", 0), reverse=True)
+        todos_docs.extend(vencidos_usd)
+
+        # Luego al día USD
+        al_dia_usd = [d for d in docs_usd if not d.get("esta_vencido", False)]
+        todos_docs.extend(al_dia_usd)
+
+        # Vencidos CRC
+        vencidos_crc = [d for d in docs_crc if d.get("esta_vencido", False)]
+        vencidos_crc.sort(key=lambda x: x.get("dias_vencido", 0), reverse=True)
+        todos_docs.extend(vencidos_crc)
+
+        # Al día CRC
+        al_dia_crc = [d for d in docs_crc if not d.get("esta_vencido", False)]
+        todos_docs.extend(al_dia_crc)
 
         if not todos_docs:
             self.set_font("Arial", "I", 9)
@@ -254,16 +291,18 @@ class PDFReporteGira(FPDF):
             self.ln(5)
             return
 
-        anchos = [40, 25, 25, 32, 15, 135, 33, 28]
+        # Anchos de columnas: No Doc, O/C, Fac, Vence, T, Descripción, Monto, Estatus, Días
+        anchos = [40, 25, 25, 32, 15, 120, 33, 28, 15]
         headers = [
             "No de Doc",
             "No de Orden",
             "Fecha Factura",
             "Fecha Vencimiento",
-            "Trans",
+            "Tipo Doc",
             "Descripción",
             "Monto Factura",
             "Estatus",
+            "Días",
         ]
 
         self._imprimir_encabezados_tabla(anchos, headers)
@@ -287,46 +326,53 @@ class PDFReporteGira(FPDF):
             saldo = doc.get("saldo", 0)
             moneda = doc.get("moneda", "")
             simbolo = "USD" if moneda == "USD" else "CRC"
+            dias_vencido = doc.get("dias_vencido", 0)
 
+            # No Doc
             consecutivo = doc.get("consecutivo_fe", "") or str(doc.get("doc_num", ""))
-            self.cell(anchos[0], 6, consecutivo, 1, 0, "C", True)
+            self.cell(anchos[0], 6, consecutivo[:10], 1, 0, "C", True)
 
-            orden = str(doc.get("orden_compra", ""))
-            if len(orden) > 15:
-                orden = orden[:12] + "..."
+            # O/C
+            orden = str(doc.get("orden_compra", ""))[:8]
             self.cell(anchos[1], 6, orden, 1, 0, "C", True)
 
+            # Fecha Factura (corta)
             fecha = doc.get("fecha", "")
             if len(fecha) >= 10:
                 try:
                     fecha = datetime.strptime(fecha[:10], "%Y-%m-%d").strftime(
-                        "%d/%m/%Y"
+                        "%d/%m/%y"
                     )
                 except:
-                    pass
+                    fecha = fecha[:5]
             self.cell(anchos[2], 6, fecha, 1, 0, "C", True)
 
+            # Fecha Vence (corta)
             fecha_vence = doc.get("fecha_vence", "")
             if len(fecha_vence) >= 10:
                 try:
                     fecha_vence = datetime.strptime(
                         fecha_vence[:10], "%Y-%m-%d"
-                    ).strftime("%d/%m/%Y")
+                    ).strftime("%d/%m/%y")
                 except:
-                    pass
+                    fecha_vence = fecha_vence[:5]
             self.cell(anchos[3], 6, fecha_vence, 1, 0, "C", True)
 
+            # Trans
             trans = doc.get("tipo_codigo", "")
             self.cell(anchos[4], 6, trans, 1, 0, "C", True)
 
-            desc = doc.get("descripcion", "")[:80]
+            # Descripción (sin truncar tanto, ahora es la columna principal)
+            desc = doc.get("descripcion", "")[:85]
             self.cell(anchos[5], 6, desc, 1, 0, "L", True)
 
+            # Monto
             monto_str = f"{simbolo} {formato_latino(abs(saldo))}"
             if saldo < 0:
                 monto_str = f"({monto_str})"
             self.cell(anchos[6], 6, monto_str, 1, 0, "R", True)
 
+            # Estatus
             if saldo < 0:
                 estatus = "A favor"
                 self.set_text_color(*VERDE)
@@ -338,19 +384,34 @@ class PDFReporteGira(FPDF):
                 self.set_text_color(*VERDE)
 
             self.set_font("Arial", "B", 8)
-            self.cell(anchos[7], 6, estatus, 1, 1, "C", True)
+            self.cell(anchos[7], 6, estatus, 1, 0, "C", True)
+            self.set_text_color(0, 0, 0)
+            self.set_font("Arial", "", 8)
+
+            # Días vencido (en rojo si vencido, 0 si al día)
+            if esta_vencido:
+                self.set_text_color(*ROJO)
+                self.set_font("Arial", "B", 8)
+                dias_str = str(dias_vencido)
+            else:
+                self.set_text_color(0, 0, 0)
+                self.set_font("Arial", "", 8)
+                dias_str = "0"
+
+            self.cell(anchos[8], 6, dias_str, 1, 1, "C", True)
             self.set_text_color(0, 0, 0)
             self.set_font("Arial", "", 8)
 
         self.ln(8)
 
     def _imprimir_encabezados_tabla(self, anchos, headers):
-        self.set_font("Arial", "B", 9)
-        self.set_fill_color(220, 220, 220)
-        self.set_text_color(0, 0, 0)
+        self.set_font("Arial", "B", 8)
+        self.set_fill_color(71, 93, 164)
+        self.set_text_color(255, 255, 255)
         for i, header in enumerate(headers):
             self.cell(anchos[i], 7, header, 1, 0, "C", True)
         self.ln()
+        self.set_text_color(0, 0, 0)
 
 
 # =============================================================================
@@ -363,60 +424,34 @@ def generar_pdf_reporte_gira(
 ) -> str:
     """
     Genera el PDF del Reporte de Gira para un agente.
-
-    Args:
-        datos: Dict con estructura:
-               {
-                   'agente': {'codigo': '...', 'nombre': '...', 'zonas': '...'},
-                   'totales_agente': {'dolares': 0, 'colones': 0},
-                   'clientes': [
-                       {
-                           'cliente': {...},
-                           'documentos': {'dolares': [], 'colones': []},
-                           'totales': {'dolares': 0, 'colones': 0}
-                       }, ...
-                   ]
-               }
-        output_dir: Directorio donde guardar el PDF
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    # Generar QR para el agente
     qr_path = generar_qr_agente(
         datos.get("agente", {}), datos.get("totales_agente", {})
     )
 
-    # Crear PDF
     pdf = PDFReporteGira()
     if qr_path:
         pdf.set_qr_path(qr_path)
 
     pdf.add_page()
-
-    # Info del Vendedor (Cabecera Principal)
     pdf.agregar_info_agente(datos.get("agente", {}), datos.get("totales_agente", {}))
 
-    # Iterar sobre cada cliente asignado al agente
     for cliente_data in datos.get("clientes", []):
-        # 1. Separador visual del cliente
         pdf.agregar_separador_cliente(cliente_data["cliente"], cliente_data["totales"])
-
-        # 2. Tabla de facturas del cliente
         pdf.agregar_tabla_documentos(
             cliente_data["documentos"]["dolares"], cliente_data["documentos"]["colones"]
         )
 
-    # Generar nombre de archivo
     codigo_agente = datos["agente"].get("codigo", "DESC")
     nombre_agente = datos["agente"].get("nombre", "Agente").replace(" ", "_")[:20]
     fecha = datetime.now().strftime("%Y%m%d")
     filename = f"GIRA_{codigo_agente}_{nombre_agente}_{fecha}.pdf"
     filepath = os.path.join(output_dir, filename)
 
-    # Guardar
     pdf.output(filepath)
 
-    # Limpiar archivo temporal del QR
     if qr_path and os.path.exists(qr_path):
         try:
             os.remove(qr_path)

@@ -14,6 +14,8 @@ import os
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 
+from sharepoint_qu import SharePointUploader
+
 # Agregar path del proyecto
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -28,11 +30,13 @@ from Generarexcel import generar_excel_estado_cuenta
 # =============================================================================
 
 # Email para pruebas (comentar en producción)
-EMAIL_PRUEBA = "devs@techconnectors.co"
+EMAIL_PRUEBA = "credito@qu.cr"
+# EMAIL_PRUEBA = "devs@techconnectors.co"
 MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al cliente real
 
 # Email para enviar el log de control (en producción: encargada de CXC)
-EMAIL_LOG_CONTROL = "devs@techconnectors.co"  # Cambiar en producción
+EMAIL_LOG_CONTROL = "credito@qu.cr"  # "devs@techconnectors.co"  # Cambiar en producción
+# EMAIL_LOG_CONTROL = "devs@techconnectors.co"  # Cambiar en producción
 
 # Tipos de documento que RESTAN al saldo (pagos, notas de crédito)
 TIPOS_QUE_RESTAN = {
@@ -628,8 +632,8 @@ def ejecutar_proceso_cxc():
         # DESARROLLO: Limitar a 2 clientes para pruebas
         # PRODUCCIÓN: Comentar o eliminar la siguiente línea
         # =====================================================================
-        clientes = clientes[:4]
-        print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
+        # clientes = clientes[:4]
+        # print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
         # =====================================================================
 
         if not clientes:
@@ -643,6 +647,8 @@ def ejecutar_proceso_cxc():
             "sin_correo": 0,
             "errores": 0,
         }
+
+        sp_uploader = SharePointUploader()
 
         for i, cliente in enumerate(clientes, 1):
             card_code = cliente.get("CardCode")
@@ -727,16 +733,22 @@ def ejecutar_proceso_cxc():
 
             # Generar PDF
             pdf_generado = False
+            excel_path = None
+
             try:
                 pdf_path = generar_pdf_estado_cuenta(datos)
                 print(f"   ✅ PDF generado: {pdf_path}")
                 pdf_generado = True
 
+                # ☁️ Subir a SharePoint en la carpeta de CXC
+                sp_uploader.upload_reporte(pdf_path, "CXC_Clientes")
+
                 # Generar Excel (mismo datos)
-                excel_path = None
+
                 try:
                     excel_path = generar_excel_estado_cuenta(datos)
                     print(f"   ✅ Excel generado: {excel_path}")
+                    sp_uploader.upload_reporte(excel_path, "CXC_Clientes")
                 except Exception as e:
                     print(f"   ⚠️ Error generando Excel: {str(e)}")
                     # No es crítico, continúa con el PDF
@@ -848,6 +860,8 @@ def ejecutar_proceso_cxc():
         try:
             log_path = log_control.generar_pdf()
             print(f"   [OK] Log generado: {log_path}")
+
+            sp_uploader.upload_reporte(log_path, "Logs_de_CXC")
 
             # Enviar log por correo
             print(f"   Enviando log a {EMAIL_LOG_CONTROL}...")

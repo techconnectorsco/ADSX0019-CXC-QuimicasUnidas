@@ -306,7 +306,7 @@ class PDFEstadoCuenta(FPDF):
             "No de Orden",
             "Fecha Factura",
             "Fecha Vencimiento",
-            "Trans",
+            "Tipo Doc",
             "Descripción",
             "Monto Factura",
             "Estatus",
