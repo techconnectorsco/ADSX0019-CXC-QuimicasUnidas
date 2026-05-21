@@ -98,10 +98,10 @@ def get_email_html(
                 line-height: 1.6;
             }}
             .container {{
-                max-width: 900px; /* Ajustado de 700px a 900px para hacerlo más ancho */
+                max-width: 900px;
                 margin: 30px auto;
                 background-color: #ffffff;
-                padding: 40px 50px; /* Mayor margen interno para que no se vea pegado a los bordes */
+                padding: 40px 50px;
                 border-radius: 10px;
                 box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
             }}
@@ -617,9 +617,11 @@ class EmailSenderAgente(EmailSenderCXC):
     """
 
     def enviar_reporte_gira(
-        self, destinatario: str, nombre_agente: str, ruta_pdf: str
+        self, destinatario: str, nombre_agente: str, ruta_pdf: str, cc: List[str] = None
     ) -> bool:
-        """Envía el PDF consolidado al agente."""
+        """
+        Envía el PDF consolidado al agente con copias (CC) opcionales.
+        """
         if not destinatario or "@" not in destinatario:
             print(
                 f"   ⚠️ Agente {nombre_agente} sin correo válido. No se puede enviar."
@@ -638,6 +640,12 @@ class EmailSenderAgente(EmailSenderCXC):
             "toRecipients": [{"emailAddress": {"address": destinatario.strip()}}],
             "attachments": [],
         }
+
+        # NUEVO: Agregar destinatarios en copia (CC)
+        if cc:
+            message["ccRecipients"] = [
+                {"emailAddress": {"address": email.strip()}} for email in cc
+            ]
 
         # Adjuntar PDF
         try:
@@ -669,11 +677,13 @@ class EmailSenderAgente(EmailSenderCXC):
 
 
 # Función de conveniencia (similar a la de CXC)
-def enviar_email_agente(destinatario: str, nombre_agente: str, ruta_pdf: str) -> bool:
+def enviar_email_agente(
+    destinatario: str, nombre_agente: str, ruta_pdf: str, cc: List[str] = None
+) -> bool:
     """Función de conveniencia para enviar el reporte al agente."""
     try:
         sender = EmailSenderAgente()
-        return sender.enviar_reporte_gira(destinatario, nombre_agente, ruta_pdf)
+        return sender.enviar_reporte_gira(destinatario, nombre_agente, ruta_pdf, cc)
     except Exception as e:
         print(f"   ❌ Error en enviar_email_agente: {e}")
         return False

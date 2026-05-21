@@ -1,12 +1,6 @@
 """
 agente.py - Químicas Unidas
 Automatización de Reportes de Gira para Agentes/Vendedores.
-
-Ejecutar los días Martes de cada semana vía Programador de Tareas.
-
-Uso:
-    python agente.py              # Ejecutar proceso completo
-    python agente.py --test       # Probar con un límite de clientes
 """
 
 import sys
@@ -26,9 +20,21 @@ from sharepoint_qu import SharePointUploader
 # CONSTANTES
 # =============================================================================
 
-# EMAIL_PRUEBA = "devs@techconnectors.co" credito@qu.cr
+# EMAIL_PRUEBA = "devs@techconnectors.co"
 EMAIL_PRUEBA = "credito@qu.cr"
 MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
+
+# AGENTES PERMITIDOS: Siviany (6), Berny (7), José (9)
+AGENTES_VALIDOS = {6, 7, 9}
+
+# CORREOS EN COPIA (CC) SOLICITADOS POR TANIA
+CORREOS_CC = [
+    "dev@soportexperto.com",
+    "erich.hoepker@qu.cr",
+    "apuschendorf@qu.cr",
+    "creditodenis@qu.cr",
+    # "credito@qu.cr",
+]
 
 TIPOS_QUE_RESTAN = {
     "DEP",
@@ -62,7 +68,7 @@ TRADUCCION_TIPOS = {
 }
 
 # =============================================================================
-# FUNCIONES DE PAGINACIÓN Y OBTENCIÓN (Reutilizadas de main.py)
+# FUNCIONES
 # =============================================================================
 
 
@@ -91,7 +97,6 @@ def obtener_todos_paginado(
 
         skip += page_size
         if skip >= 10000:
-            print(f"   ⚠️ Límite de seguridad alcanzado en {entidad}")
             break
     return todos
 
@@ -99,9 +104,11 @@ def obtener_todos_paginado(
 def obtener_clientes_con_saldo(
     conn: ServiceLayerConnection, limite: int = None
 ) -> List[Dict]:
+    # NUEVO FILTRO: Trae clientes con saldo != 0, O cuentas hijas, O Colonos/Gollos
+    filtro = "CardType eq 'cCustomer' and Valid eq 'tYES' and (CurrentAccountBalance ne 0 or FatherCard ne null or contains(CardName, 'COLONO') or contains(CardName, 'GOLLO') or contains(CardName, 'GOLLOS'))"
     params = {
-        "$filter": "CardType eq 'cCustomer' and Valid eq 'tYES' and CurrentAccountBalance ne 0",
-        "$select": "CardCode,CardName,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,CreditLimit,ContactPerson,Address",
+        "$filter": filtro,
+        "$select": "CardCode,CardName,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,CreditLimit,ContactPerson,Address,Currency,FatherCard",
     }
     if limite:
         params["$top"] = limite
@@ -112,13 +119,11 @@ def obtener_clientes_con_saldo(
 
 
 def obtener_vendedores(conn: ServiceLayerConnection) -> Dict[int, Dict]:
-    """Obtiene todos los vendedores y sus correos para tenerlos en memoria caché."""
     vendedores = {}
     params = {"$select": "SalesEmployeeCode,SalesEmployeeName,Email"}
     resultado = obtener_todos_paginado(
         conn, "SalesPersons", params, "SalesEmployeeCode"
     )
-
     for v in resultado:
         vendedores[v["SalesEmployeeCode"]] = {
             "nombre": v.get("SalesEmployeeName", "No asignado"),
@@ -150,12 +155,6 @@ def obtener_contacto_principal(
     return {"nombre": "", "telefono": "", "email": ""}
 
 
-def traducir_tipo_documento(tipo: str) -> str:
-    if not tipo:
-        return "Documento"
-    return TRADUCCION_TIPOS.get(tipo.upper(), tipo)
-
-
 def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
     hoy = datetime.now().date()
 
@@ -180,8 +179,6 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
     fecha_vence_str = doc.get("DocDueDate", "")
     dias_vencido = 0
     esta_vencido = False
-
-    dias_vencido = 0
 
     if fecha_vence_str:
         try:
@@ -213,6 +210,7 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
         "doc_num": doc.get("DocNum"),
         "consecutivo_fe": consecutivo,
         "tipo_codigo": tipo_doc,
+        "destino": doc.get("ShipToCode", "") or "",  # <-- NUEVO CAMPO DE ZONA/DESTINO
         "descripcion": descripcion,
         "fecha": str(doc.get("DocDate", ""))[:10],
         "fecha_vence": str(fecha_vence_str)[:10] if fecha_vence_str else "",
@@ -229,17 +227,16 @@ def obtener_documentos_cliente(
     conn: ServiceLayerConnection, card_code: str
 ) -> List[Dict]:
     documentos = []
-
+    # Se agregó ShipToCode a la consulta
     facturas = obtener_todos_paginado(
         conn,
         "Invoices",
         {
             "$filter": f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open'",
-            "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,DocumentLines",
+            "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,ShipToCode,DocumentLines",
         },
         "DocDueDate",
     )
-
     for f in facturas:
         doc = procesar_documento(f, "invoice")
         if doc:
@@ -250,11 +247,10 @@ def obtener_documentos_cliente(
         "CreditNotes",
         {
             "$filter": f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open'",
-            "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,DocumentLines",
+            "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,ShipToCode,DocumentLines",
         },
         "DocDueDate",
     )
-
     for nc in notas_credito:
         doc = procesar_documento(nc, "creditnote")
         if doc:
@@ -263,25 +259,12 @@ def obtener_documentos_cliente(
     return documentos
 
 
-def separar_por_moneda(documentos: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
-    colones = [d for d in documentos if d["moneda"] == "CRC"]
-    dolares = [d for d in documentos if d["moneda"] == "USD"]
-    return colones, dolares
-
-
-# =============================================================================
-# PREPARACIÓN DE DATOS PARA EL REPORTE DE GIRA (POR CLIENTE)
-# =============================================================================
-
-
 def procesar_datos_cliente(
     conn: ServiceLayerConnection, cliente: Dict
 ) -> Optional[Dict]:
-    """Extrae los documentos de un cliente y retorna su estructura si tiene deudas."""
     card_code = cliente.get("CardCode")
     contacto = obtener_contacto_principal(conn, card_code, cliente.get("ContactPerson"))
 
-    # Obtener plazo de pago y descuentos
     condicion_pago, plazo_dias = obtener_condicion_pago(
         conn, cliente.get("PayTermsGrpCode")
     )
@@ -292,13 +275,25 @@ def procesar_datos_cliente(
     if not documentos:
         return None
 
-    doc_colones, doc_dolares = separar_por_moneda(documentos)
+    doc_colones = [d for d in documentos if d["moneda"] == "CRC"]
+    doc_dolares = [d for d in documentos if d["moneda"] == "USD"]
 
     total_colones = sum(d["saldo"] for d in doc_colones)
     total_dolares = sum(d["saldo"] for d in doc_dolares)
 
     if total_colones == 0 and total_dolares == 0:
         return None
+
+    # LÓGICA DE MONEDA PARA LÍMITE DE CRÉDITO
+    moneda_bp = cliente.get("Currency", "CRC")
+    if moneda_bp == "##":
+        if total_dolares > 0 and total_colones == 0:
+            moneda_limite = "USD"
+        else:
+            # Por defecto CRC si es multimoneda pero no pudimos inferir
+            moneda_limite = "CRC"
+    else:
+        moneda_limite = moneda_bp
 
     return {
         "cliente": {
@@ -313,33 +308,25 @@ def procesar_datos_cliente(
             "descuento_porcent": descuento_porcent,
             "grupo_descuento": grupo_descuento,
             "limite_credito": cliente.get("CreditLimit", 0) or 0,
+            "moneda_limite": moneda_limite,
             "zona_gira": cliente.get("U_ZGIRA", "N/A"),
         },
-        "documentos": {
-            "colones": doc_colones,
-            "dolares": doc_dolares,
-        },
-        "totales": {
-            "colones": total_colones,
-            "dolares": total_dolares,
-        },
+        "documentos": {"colones": doc_colones, "dolares": doc_dolares},
+        "totales": {"colones": total_colones, "dolares": total_dolares},
     }
 
 
 def obtener_condicion_pago(conn: ServiceLayerConnection, pay_terms_code: int) -> tuple:
-    """Obtiene la descripción de la condición de pago y los días."""
     if not pay_terms_code:
         return "No especificado", 30
-
     try:
         resultado = conn.get(f"PaymentTermsTypes({pay_terms_code})")
         if resultado:
-            nombre = resultado.get("PaymentTermsGroupName", "No especificado")
-            dias = int(resultado.get("NumberOfDaysForPayment", 30))
-            return nombre, dias
+            return resultado.get("PaymentTermsGroupName", "No especificado"), int(
+                resultado.get("NumberOfDaysForPayment", 30)
+            )
     except:
         pass
-
     return "No especificado", 30
 
 
@@ -360,43 +347,32 @@ def ejecutar_reportes_gira():
         return
 
     try:
-        # 1. Traer lista de vendedores (caché)
         print("\n📋 Obteniendo listado de Agentes...")
         vendedores_cache = obtener_vendedores(conn)
 
-        # 2. Traer todos los clientes con saldo
-        print("📋 Obteniendo clientes con saldo pendiente...")
-        # NOTA: Quita el parámetro limite=20 en producción
+        print("📋 Obteniendo clientes...")
         clientes = obtener_clientes_con_saldo(
             conn, limite=20 if "--test" in sys.argv else None
         )
-        print(f"   Total clientes con saldo: {len(clientes)}")
-
+        print(f"   Total clientes extraidos: {len(clientes)}")
         if not clientes:
-            print("   No hay clientes con saldo pendiente")
             return
 
-        # 3. Agrupar clientes por Agente (SalesPersonCode)
         print("\n🔄 Agrupando clientes por Agente...")
         agrupados_por_agente = {}
 
         for cli in clientes:
             vendedor_id = cli.get("SalesPersonCode", -1)
+            # FILTRO CRÍTICO: Solo procesar los agentes válidos indicados por Tania
+            if vendedor_id not in AGENTES_VALIDOS:
+                continue
+
             if vendedor_id not in agrupados_por_agente:
                 agrupados_por_agente[vendedor_id] = []
             agrupados_por_agente[vendedor_id].append(cli)
 
-        print(
-            f"   Se identificaron {len(agrupados_por_agente)} agentes con cobros pendientes."
-        )
-
-        # ================================================================
-        # IMPORTANTE: Inicializar la clase que envía los correos
-        # ================================================================
         sender = EmailSenderAgente()
         sp_uploader = SharePointUploader()
-
-        # 4. Procesar y generar documento por cada Agente
         resultados = {"procesados": 0, "enviados": 0, "errores": 0, "sin_correo": 0}
 
         for vendedor_id, clientes_del_agente in agrupados_por_agente.items():
@@ -408,10 +384,6 @@ def ejecutar_reportes_gira():
 
             print(f"\n👨‍💼 Procesando Agente: {nombre_agente} (ID: {vendedor_id})")
 
-            # ================================================================
-            # NUEVO: Ordenar los clientes del agente por ZONA y luego por Nombre
-            # ================================================================
-            # Usamos 'ZZZ' por si algún cliente no tiene zona, para que quede al final del reporte
             clientes_del_agente.sort(
                 key=lambda c: (
                     str(c.get("U_ZGIRA") or "ZZZ").zfill(3),
@@ -419,65 +391,46 @@ def ejecutar_reportes_gira():
                 )
             )
 
-            print(f"   Clientes asignados con saldo: {len(clientes_del_agente)}")
-
             datos_reporte = {
                 "agente": {
                     "codigo": str(vendedor_id),
                     "nombre": nombre_agente,
                     "correo": correo_agente,
-                    "zonas": set(),  # Se llenará dinámicamente
+                    "zonas": set(),
                 },
                 "totales_agente": {"dolares": 0, "colones": 0},
                 "clientes": [],
             }
 
-            # Procesar cada cliente del agente (ahora ya vienen ordenados por zona)
             for i, cli in enumerate(clientes_del_agente, 1):
                 datos_cli = procesar_datos_cliente(conn, cli)
                 if datos_cli:
                     datos_reporte["clientes"].append(datos_cli)
-                    # Sumar a los totales del agente
                     datos_reporte["totales_agente"]["colones"] += datos_cli["totales"][
                         "colones"
                     ]
                     datos_reporte["totales_agente"]["dolares"] += datos_cli["totales"][
                         "dolares"
                     ]
-                    # Registrar la zona
                     zona = datos_cli["cliente"]["zona_gira"]
                     if zona:
                         datos_reporte["agente"]["zonas"].add(str(zona))
 
-            # Si después de procesar resultó que nadie tenía documentos válidos, saltar
             if not datos_reporte["clientes"]:
-                print("   ⏭️ Sin documentos finales pendientes para este agente.")
+                print("   ⏭️ Sin documentos pendientes para este agente.")
                 continue
 
-            # Formatear zonas como string
             zonas_list = list(datos_reporte["agente"]["zonas"])
             datos_reporte["agente"]["zonas"] = (
                 ", ".join(zonas_list) if zonas_list else "Múltiples/No Definida"
             )
-
             resultados["procesados"] += 1
 
-            print(f"   ✅ Clientes con documentos: {len(datos_reporte['clientes'])}")
-            print(
-                f"   💰 Total a cobrar USD: ${datos_reporte['totales_agente']['dolares']:,.2f}"
-            )
-            print(
-                f"   💰 Total a cobrar CRC: ₡{datos_reporte['totales_agente']['colones']:,.2f}"
-            )
-
-            # Generar PDF
             try:
                 pdf_path = generar_pdf_reporte_gira(datos_reporte)
                 print(f"   📄 PDF Generado: {pdf_path}")
-
                 sp_uploader.upload_reporte(pdf_path, "Giras")
 
-                # 2. Determinar destinatario según MODO_PRUEBA
                 correo_sap = info_vendedor.get("correo", "")
 
                 if MODO_PRUEBA:
@@ -488,37 +441,35 @@ def ejecutar_reportes_gira():
                 else:
                     destinatario = correo_sap
 
-                # 3. Validar y Enviar
                 if not destinatario or "@" not in str(destinatario):
-                    print(
-                        f"   ⚠️ Agente {nombre_agente} no tiene correo asignado. Saltando envío."
-                    )
+                    print(f"   ⚠️ Agente {nombre_agente} sin correo. Saltando envío.")
                     resultados["sin_correo"] += 1
                     continue
 
+                # AQUÍ SE PASA LA LISTA CC A LA FUNCIÓN DE CORREO
+                # (Asegúrate de que tu función en sendemailCXC acepte un parámetro extra para CC)
                 exito = sender.enviar_reporte_gira(
-                    destinatario, nombre_agente, pdf_path
+                    destinatario, nombre_agente, pdf_path, cc=CORREOS_CC
                 )
 
                 if exito:
                     print(f"   ✅ Reporte enviado con éxito.")
                     resultados["enviados"] += 1
                 else:
-                    print(f"   ❌ Error al enviar el correo vía Graph API.")
+                    print(f"   ❌ Error al enviar el correo.")
                     resultados["errores"] += 1
 
             except Exception as e:
                 print(f"   ❌ Error procesando agente {nombre_agente}: {str(e)}")
                 resultados["errores"] += 1
 
-        # 5. Resumen final
         print("\n" + "=" * 80)
         print("📊 RESUMEN DEL PROCESO DE GIRAS")
         print("=" * 80)
         print(f"   Agentes procesados: {resultados['procesados']}")
         print(f"   Reportes enviados: {resultados['enviados']}")
         print(f"   Agentes sin correo: {resultados['sin_correo']}")
-        print(f"   Errores de generación/envío: {resultados['errores']}")
+        print(f"   Errores: {resultados['errores']}")
         print("=" * 80)
 
     finally:
