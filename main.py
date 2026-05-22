@@ -20,7 +20,7 @@ from sharepoint_qu import SharePointUploader
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from modules.database.conexion import ServiceLayerConnection
-from modules.documentos.generarpdf import generar_pdf_estado_cuenta
+from generarpdf import generar_pdf_estado_cuenta
 from sendemailCXC import enviar_estado_cuenta
 from logcontrolcxc import ControlCXC
 from Generarexcel import generar_excel_estado_cuenta
@@ -30,13 +30,13 @@ from Generarexcel import generar_excel_estado_cuenta
 # =============================================================================
 
 # Email para pruebas (comentar en producción)
-EMAIL_PRUEBA = "credito@qu.cr"
-# EMAIL_PRUEBA = "devs@techconnectors.co"
+# EMAIL_PRUEBA = "credito@qu.cr"
+EMAIL_PRUEBA = "devs@techconnectors.co"
 MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al cliente real
 
 # Email para enviar el log de control (en producción: encargada de CXC)
-EMAIL_LOG_CONTROL = "credito@qu.cr"  # "devs@techconnectors.co"  # Cambiar en producción
-# EMAIL_LOG_CONTROL = "devs@techconnectors.co"  # Cambiar en producción
+# EMAIL_LOG_CONTROL = "credito@qu.cr"  # "devs@techconnectors.co"  # Cambiar en producción
+EMAIL_LOG_CONTROL = "devs@techconnectors.co"  # Cambiar en producción
 
 # Tipos de documento que RESTAN al saldo (pagos, notas de crédito)
 TIPOS_QUE_RESTAN = {
@@ -150,7 +150,7 @@ def obtener_clientes_con_saldo(
     """
     params = {
         "$filter": "CardType eq 'cCustomer' and Valid eq 'tYES' and CurrentAccountBalance ne 0",
-        "$select": "CardCode,CardName,EmailAddress,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,U_NVT_CorreoEstadoCuenta,U_NTV_EnvioAutomatico,CreditLimit,ContactPerson,Address,PayTermsGrpCode,FreeText",
+        "$select": "CardCode,CardName,EmailAddress,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,U_NVT_CorreoEstadoCuenta,U_NTV_EnvioAutomatico,CreditLimit,ContactPerson,Address,PayTermsGrpCode,FreeText,Currency",
     }
 
     if limite:
@@ -162,7 +162,7 @@ def obtener_clientes_con_saldo(
 
 
 def obtener_condicion_pago(conn: ServiceLayerConnection, pay_terms_code: int) -> tuple:
-    """Obtiene la descripción de la condición de pago y los días."""
+    """Obtiene la descripción de la condición de pago y los días, validando errores de SAP."""
     if not pay_terms_code:
         return "No especificado", 30
 
@@ -170,7 +170,21 @@ def obtener_condicion_pago(conn: ServiceLayerConnection, pay_terms_code: int) ->
         resultado = conn.get(f"PaymentTermsTypes({pay_terms_code})")
         if resultado:
             nombre = resultado.get("PaymentTermsGroupName", "No especificado")
-            dias = int(resultado.get("NumberOfDaysForPayment", 30))
+
+            # Usar la llave correcta que descubrimos
+            dias = int(resultado.get("NumberOfAdditionalDays", 0))
+
+            # =================================================================
+            # PARCHE PARA ERROR EN SAP:
+            # El ID 3 ("Crédito a 30 días") tiene los días en 0 en la base de datos.
+            # =================================================================
+            if dias == 0 and "30" in nombre:
+                dias = 30
+
+            # Fallback general por si SAP devuelve 0 pero no es de contado
+            if dias == 0 and "contado" not in nombre.lower() and pay_terms_code != -1:
+                dias = 30
+
             return nombre, dias
     except:
         pass
@@ -223,23 +237,36 @@ def obtener_contacto_principal(
     return {"nombre": "", "telefono": "", "email": ""}
 
 
+def obtener_codigos_familia(conn: ServiceLayerConnection, card_code: str) -> List[str]:
+    """Obtiene el código padre y los códigos de todas sus cuentas hijas."""
+    codigos = [card_code]
+    params = {"$filter": f"FatherCard eq '{card_code}'", "$select": "CardCode"}
+    hijas = obtener_todos_paginado(conn, "BusinessPartners", params, "CardCode")
+    for h in hijas:
+        codigos.append(h["CardCode"])
+    return codigos
+
+
 def obtener_documentos_cliente(
     conn: ServiceLayerConnection, card_code: str
 ) -> List[Dict]:
     """
-    Obtiene TODOS los documentos pendientes de un cliente:
-    - Invoices (Facturas)
-    - CreditNotes (Notas de crédito)
-    - IncomingPayments (Pagos recibidos) - solo pendientes
+    Obtiene TODOS los documentos pendientes de un cliente y sus sucursales (hijas).
     """
     documentos = []
 
-    # 1. FACTURAS (Invoices) - incluye Facturas, Notas Débito
+    # 1. Obtener Padre e Hijas
+    codigos_familia = obtener_codigos_familia(conn, card_code)
+
+    # Crear un filtro dinámico: (CardCode eq 'Padre' or CardCode eq 'Hija1' ...)
+    filtro_codigos = " or ".join([f"CardCode eq '{c}'" for c in codigos_familia])
+
+    # 2. FACTURAS (Invoices)
     facturas = obtener_todos_paginado(
         conn,
         "Invoices",
         {
-            "$filter": f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open'",
+            "$filter": f"({filtro_codigos}) and DocumentStatus eq 'bost_Open'",
             "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,DocumentLines",
         },
         "DocDueDate",
@@ -250,12 +277,12 @@ def obtener_documentos_cliente(
         if doc:
             documentos.append(doc)
 
-    # 2. NOTAS DE CRÉDITO (CreditNotes)
+    # 3. NOTAS DE CRÉDITO (CreditNotes)
     notas_credito = obtener_todos_paginado(
         conn,
         "CreditNotes",
         {
-            "$filter": f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open'",
+            "$filter": f"({filtro_codigos}) and DocumentStatus eq 'bost_Open'",
             "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,DocumentLines",
         },
         "DocDueDate",
@@ -266,9 +293,66 @@ def obtener_documentos_cliente(
         if doc:
             documentos.append(doc)
 
-    # 3. PAGOS RECIBIDOS (IncomingPayments)
-    # TODO: Investigar campos correctos si se necesitan pagos con saldo a favor
-    # Por ahora las facturas y notas de crédito cubren la mayoría de casos
+    # -------------------------------------------------------------------------
+    # 4. PAGOS RECIBIDOS CON SOBRANTE (PR)
+    # -------------------------------------------------------------------------
+    pagos = obtener_todos_paginado(
+        conn,
+        "IncomingPayments",
+        {
+            "$filter": f"({filtro_codigos}) and Cancelled eq 'tNO'",
+            "$select": "DocNum,DocDate,TransferSum,CashSum,DocCurrency,PaymentInvoices,Remarks,Reference1",
+        },
+        "DocDate",
+    )
+
+    for p in pagos:
+        # 1. Sumar los métodos de pago (Efectivo + Transferencia, etc.)
+        total_pagado = float(p.get("TransferSum", 0) or 0) + float(
+            p.get("CashSum", 0) or 0
+        )
+
+        # 2. Sumar lo que sí se aplicó a facturas
+        suma_aplicada = 0
+        for inv in p.get("PaymentInvoices", []):
+            suma_aplicada += float(inv.get("SumApplied", 0) or 0)
+
+        # 3. El sobrante es la diferencia redondeada a 2 decimales (para evitar errores de punto flotante)
+        sobrante = round(total_pagado - suma_aplicada, 2)
+
+        # Si hay un sobrante real a favor del cliente
+        if sobrante > 0.05:
+            fecha_pago = str(p.get("DocDate", ""))[:10]
+
+            # =================================================================
+            # FILTRO PARA EXCLUIR PRs MUY VIEJOS (A petición de Tania)
+            # Cambia este año límite según lo que ella te indique.
+            # =================================================================
+            anio_pago = int(fecha_pago[:4])
+            if anio_pago < 2024:
+                continue  # Salta los sobrantes de 2022 o anteriores
+            # =================================================================
+
+            moneda_pago = "CRC" if p.get("DocCurrency") in ["COL", "CRC"] else "USD"
+
+            doc_pr = {
+                "doc_num": p.get("DocNum"),
+                "doc_entry": p.get("DocNum"),
+                "consecutivo_fe": p.get("Reference1", ""),
+                "tipo_codigo": "PR",
+                "tipo_texto": "Pago a Favor (Sobrante)",
+                "descripcion": p.get("Remarks", "Saldo a favor no aplicado"),
+                "series": [],
+                "fecha": fecha_pago,
+                "fecha_vence": fecha_pago,
+                "total": -abs(sobrante),  # Negativo porque resta la deuda
+                "saldo": -abs(sobrante),  # Negativo porque resta la deuda
+                "moneda": moneda_pago,
+                "dias_vencido": 0,
+                "esta_vencido": False,
+                "orden_compra": "",
+            }
+            documentos.append(doc_pr)
 
     return documentos
 
@@ -468,17 +552,14 @@ def determinar_correos_cliente(cliente: Dict) -> List[str]:
 def cliente_permite_envio(cliente: Dict) -> bool:
     """
     Verifica si el cliente tiene habilitado el envío automático.
-
-    NOTA: Actualmente todos están en 'N'.
-    Mientras se configura, esta función retorna True para todos.
-    Cuando esté listo, descomentar la validación.
+    Tania utiliza 'Y' (Sí) o 'N' (No) en SAP.
     """
-    # TODO: Activar validación cuando los operadores configuren los clientes
-    # envio_auto = cliente.get('U_NTV_EnvioAutomatico', '')
-    # return envio_auto.upper() == 'S'
+    envio_auto = cliente.get("U_NTV_EnvioAutomatico", "")
+    # Aceptamos 'Y' o 'S' por seguridad. Si no tiene nada, asumimos que no se envía.
+    if not envio_auto:
+        return False
 
-    # Por ahora, permitir a todos (modo desarrollo)
-    return True
+    return envio_auto.upper() in ["Y", "S"]
 
 
 def calcular_rangos_vencimiento(documentos: List[Dict]) -> Dict:
@@ -564,6 +645,13 @@ def preparar_datos_cliente(conn: ServiceLayerConnection, cliente: Dict) -> Dict:
     # Determinar correos (puede ser múltiples)
     correos = determinar_correos_cliente(cliente)
 
+    # Si en SAP el cliente es explícitamente "USD", su límite es USD.
+    # Si es "CRC" o "##" (Multimoneda), SAP obliga a que el límite se guarde en colones.
+    # NO miramos los documentos para nada.
+    # =========================================================================
+    moneda_bp = cliente.get("Currency", "CRC")
+    moneda_limite = "USD" if moneda_bp in ["USD", "US$"] else "CRC"
+
     return {
         "cliente": {
             "codigo": card_code,
@@ -579,6 +667,7 @@ def preparar_datos_cliente(conn: ServiceLayerConnection, cliente: Dict) -> Dict:
             "condicion_pago": condicion_pago,
             "plazo_dias": plazo_dias,
             "limite_credito": cliente.get("CreditLimit", 0) or 0,
+            "moneda_limite": moneda_limite,
             "saldo_total": cliente.get("CurrentAccountBalance", 0) or 0,
             "envio_automatico": cliente.get("U_NTV_EnvioAutomatico", ""),
         },
@@ -632,8 +721,8 @@ def ejecutar_proceso_cxc():
         # DESARROLLO: Limitar a 2 clientes para pruebas
         # PRODUCCIÓN: Comentar o eliminar la siguiente línea
         # =====================================================================
-        # clientes = clientes[:4]
-        # print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
+        clientes = clientes[:2]
+        print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
         # =====================================================================
 
         if not clientes:

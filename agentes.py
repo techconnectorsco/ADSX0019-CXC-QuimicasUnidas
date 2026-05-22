@@ -20,8 +20,8 @@ from sharepoint_qu import SharePointUploader
 # CONSTANTES
 # =============================================================================
 
-# EMAIL_PRUEBA = "devs@techconnectors.co"
-EMAIL_PRUEBA = "credito@qu.cr"
+EMAIL_PRUEBA = "devs@techconnectors.co"
+# EMAIL_PRUEBA = "credito@qu.cr"
 MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
 
 # AGENTES PERMITIDOS: Siviany (6), Berny (7), José (9)
@@ -30,9 +30,9 @@ AGENTES_VALIDOS = {6, 7, 9}
 # CORREOS EN COPIA (CC) SOLICITADOS POR TANIA
 CORREOS_CC = [
     "dev@soportexperto.com",
-    "erich.hoepker@qu.cr",
-    "apuschendorf@qu.cr",
-    "creditodenis@qu.cr",
+    # "erich.hoepker@qu.cr",
+    # "apuschendorf@qu.cr",
+    # "creditodenis@qu.cr",
     # "credito@qu.cr",
 ]
 
@@ -256,6 +256,65 @@ def obtener_documentos_cliente(
         if doc:
             documentos.append(doc)
 
+    # -------------------------------------------------------------------------
+    # PAGOS RECIBIDOS CON SOBRANTE (PR) - Filtro < 2024
+    # -------------------------------------------------------------------------
+    pagos = obtener_todos_paginado(
+        conn,
+        "IncomingPayments",
+        {
+            "$filter": f"CardCode eq '{card_code}' and Cancelled eq 'tNO'",
+            "$select": "DocNum,DocDate,TransferSum,CashSum,DocCurrency,PaymentInvoices,PaymentChecks,Remarks,Reference1",
+        },
+        "DocDate",
+    )
+
+    for p in pagos:
+        # Sumar Efectivo + Transferencia + Cheques
+        efectivo = float(p.get("CashSum", 0) or 0)
+        transferencia = float(p.get("TransferSum", 0) or 0)
+        cheques = sum(
+            float(chk.get("CheckSum", 0) or 0) for chk in p.get("PaymentChecks", [])
+        )
+
+        total_pagado = efectivo + transferencia + cheques
+
+        # Sumar lo aplicado a facturas
+        suma_aplicada = sum(
+            float(inv.get("SumApplied", 0) or 0) for inv in p.get("PaymentInvoices", [])
+        )
+
+        # Diferencia
+        sobrante = round(total_pagado - suma_aplicada, 2)
+
+        # Si hay sobrante real
+        if sobrante > 0.05:
+            fecha_pago = str(p.get("DocDate", ""))[:10]
+            anio_pago = int(fecha_pago[:4])
+
+            # EXCLUIR SOBRANTES ANTERIORES A 2024
+            if anio_pago < 2024:
+                continue
+
+            moneda_pago = "CRC" if p.get("DocCurrency") in ["COL", "CRC"] else "USD"
+
+            doc_pr = {
+                "doc_num": p.get("DocNum"),
+                "consecutivo_fe": p.get("Reference1", ""),
+                "tipo_codigo": "PR",
+                "destino": "N/A",  # Los pagos no suelen tener destino/zona de envío
+                "descripcion": p.get("Remarks", "Saldo a favor no aplicado"),
+                "fecha": fecha_pago,
+                "fecha_vence": fecha_pago,
+                "total": -abs(sobrante),
+                "saldo": -abs(sobrante),
+                "moneda": moneda_pago,
+                "esta_vencido": False,
+                "dias_vencido": 0,
+                "orden_compra": "",
+            }
+            documentos.append(doc_pr)
+
     return documentos
 
 
@@ -286,14 +345,7 @@ def procesar_datos_cliente(
 
     # LÓGICA DE MONEDA PARA LÍMITE DE CRÉDITO
     moneda_bp = cliente.get("Currency", "CRC")
-    if moneda_bp == "##":
-        if total_dolares > 0 and total_colones == 0:
-            moneda_limite = "USD"
-        else:
-            # Por defecto CRC si es multimoneda pero no pudimos inferir
-            moneda_limite = "CRC"
-    else:
-        moneda_limite = moneda_bp
+    moneda_limite = "USD" if moneda_bp in ["USD", "US$"] else "CRC"
 
     return {
         "cliente": {
@@ -317,16 +369,33 @@ def procesar_datos_cliente(
 
 
 def obtener_condicion_pago(conn: ServiceLayerConnection, pay_terms_code: int) -> tuple:
+    """Obtiene la descripción de la condición de pago y los días, validando errores de SAP."""
     if not pay_terms_code:
         return "No especificado", 30
+
     try:
         resultado = conn.get(f"PaymentTermsTypes({pay_terms_code})")
         if resultado:
-            return resultado.get("PaymentTermsGroupName", "No especificado"), int(
-                resultado.get("NumberOfDaysForPayment", 30)
-            )
+            nombre = resultado.get("PaymentTermsGroupName", "No especificado")
+
+            # Usar la llave correcta que descubrimos
+            dias = int(resultado.get("NumberOfAdditionalDays", 0))
+
+            # =================================================================
+            # PARCHE PARA ERROR EN SAP:
+            # El ID 3 ("Crédito a 30 días") tiene los días en 0 en la base de datos.
+            # =================================================================
+            if dias == 0 and "30" in nombre:
+                dias = 30
+
+            # Fallback general por si SAP devuelve 0 pero no es de contado
+            if dias == 0 and "contado" not in nombre.lower() and pay_terms_code != -1:
+                dias = 30
+
+            return nombre, dias
     except:
         pass
+
     return "No especificado", 30
 
 
