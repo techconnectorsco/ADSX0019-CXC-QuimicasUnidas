@@ -30,10 +30,9 @@ except ImportError:
 
 
 # =============================================================================
-# CONFIGURACIÓN
+# CONFIGURACIÓN Y CONSTANTES BANCARIAS
 # =============================================================================
 
-# Credenciales Azure AD (cargar desde .env)
 if DECOUPLE_DISPONIBLE:
     TENANT_ID = config("TENANT_ID", default="")
     CLIENT_ID = config("CLIENT_ID", default="")
@@ -47,28 +46,116 @@ else:
 
 # Rutas de imágenes
 RUTA_LOGO = "images/QU.png"
-RUTA_FOOTER = "images/footer.png"
+RUTA_FIRMA = "images/Firma_digital_Asistente.gif"
 
+# Cuentas bancarias para el cuerpo del correo
+CUENTAS_BANCARIAS = [
+    {
+        "banco": "BCR",
+        "moneda": "COLONES",
+        "cuenta": "001-145244-4",
+        "cc": "15201001014524442",
+        "iban": "CR36015201001014524442",
+    },
+    {
+        "banco": "BCR",
+        "moneda": "DÓLARES",
+        "cuenta": "001-0279168-4",
+        "cc": None,
+        "iban": "CR52015201001027916847",
+    },
+    {
+        "banco": "BN",
+        "moneda": "COLONES",
+        "cuenta": "100-01-000-016985-4",
+        "cc": "15100010010169851",
+        "iban": "CR50015100010010169851",
+    },
+    {
+        "banco": "BAC SAN JOSÉ",
+        "moneda": "COLONES",
+        "cuenta": None,
+        "cc": None,
+        "iban": "CR60010200009019709051",
+    },
+]
 
 # =============================================================================
-# PLANTILLA HTML DEL CORREO
+# GENERACIÓN DE HTML
 # =============================================================================
+
+
+def generar_html_cuentas() -> str:
+    """Genera una sección HTML estilizada para las cuentas bancarias."""
+    cuentas_colones = [c for c in CUENTAS_BANCARIAS if c["moneda"] == "COLONES"]
+    cuentas_dolares = [c for c in CUENTAS_BANCARIAS if c["moneda"] == "DÓLARES"]
+
+    html = """
+    <div style="background-color: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; margin: 25px 0; overflow: hidden;">
+        <div style="background-color: #475da4; color: white; padding: 12px 20px; font-weight: bold; font-size: 16px;">
+            🏦 Cuentas Bancarias Autorizadas
+        </div>
+        <div style="padding: 20px;">
+            <p style="margin-top: 0; color: #666; font-size: 14px;">Para facilitar sus pagos, adjuntamos nuestras cuentas bancarias. Si escanea el código QR en su PDF adjunto, también podrá acceder a esta información.</p>
+    """
+
+    # Render Colones
+    html += f"""
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <tr style="background-color: #e3f2fd;"><th colspan="4" style="padding: 8px; text-align: left; color: #0066cc; border-bottom: 2px solid #90caf9;">Cuentas en COLONES (₡)</th></tr>
+            <tr style="font-size: 13px; color: #555; background-color: #f1f1f1;">
+                <th style="padding: 8px; text-align: left;">Banco</th>
+                <th style="padding: 8px; text-align: left;">Cuenta Corriente</th>
+                <th style="padding: 8px; text-align: left;">Cuenta Cliente (CC)</th>
+                <th style="padding: 8px; text-align: left;">Cuenta IBAN</th>
+            </tr>
+    """
+    for c in cuentas_colones:
+        cta = c["cuenta"] or "N/A"
+        cc = c["cc"] or "N/A"
+        html += f"""
+            <tr style="font-size: 13px; border-bottom: 1px solid #eee;">
+                <td style="padding: 8px; font-weight: bold;">{c['banco']}</td>
+                <td style="padding: 8px;">{cta}</td>
+                <td style="padding: 8px;">{cc}</td>
+                <td style="padding: 8px; font-family: monospace;">{c['iban']}</td>
+            </tr>
+        """
+    html += "</table>"
+
+    # Render Dólares
+    html += f"""
+        <table style="width: 100%; border-collapse: collapse;">
+            <tr style="background-color: #e8f5e9;"><th colspan="4" style="padding: 8px; text-align: left; color: #2e7d32; border-bottom: 2px solid #a5d6a7;">Cuentas en DÓLARES ($)</th></tr>
+            <tr style="font-size: 13px; color: #555; background-color: #f1f1f1;">
+                <th style="padding: 8px; text-align: left;">Banco</th>
+                <th style="padding: 8px; text-align: left;">Cuenta Corriente</th>
+                <th style="padding: 8px; text-align: left;">Cuenta Cliente (CC)</th>
+                <th style="padding: 8px; text-align: left;">Cuenta IBAN</th>
+            </tr>
+    """
+    for c in cuentas_dolares:
+        cta = c["cuenta"] or "N/A"
+        cc = c["cc"] or "N/A"
+        html += f"""
+            <tr style="font-size: 13px; border-bottom: 1px solid #eee;">
+                <td style="padding: 8px; font-weight: bold;">{c['banco']}</td>
+                <td style="padding: 8px;">{cta}</td>
+                <td style="padding: 8px;">{cc}</td>
+                <td style="padding: 8px; font-family: monospace;">{c['iban']}</td>
+            </tr>
+        """
+    html += """
+        </table>
+        </div>
+    </div>
+    """
+    return html
 
 
 def get_email_html(
     nombre_cliente: str, datos: Dict = None, plazo_dias: int = 30
 ) -> str:
-    """
-    Genera el HTML del correo de estado de cuenta.
-
-    Args:
-        nombre_cliente: Nombre del cliente destinatario
-        datos: Datos del cliente (opcional, para personalización)
-
-    Returns:
-        String con el HTML del correo
-    """
-    # Resumen de saldos (si están disponibles)
     resumen_html = ""
     if datos:
         totales = datos.get("totales", {})
@@ -83,85 +170,27 @@ def get_email_html(
                 resumen_html += f'<p style="margin: 5px 0; font-size: 15px;">• Saldo en Colones: <strong>CRC {totales["colones"]:,.2f}</strong></p>'
             resumen_html += "</div>"
 
+    cuentas_bancarias_html = generar_html_cuentas()
+
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
         <style>
-            body {{
-                font-family: 'Segoe UI', Arial, sans-serif;
-                color: #333333;
-                background-color: #f4f4f4;
-                margin: 0;
-                padding: 0;
-                line-height: 1.6;
-            }}
-            .container {{
-                max-width: 900px;
-                margin: 30px auto;
-                background-color: #ffffff;
-                padding: 40px 50px;
-                border-radius: 10px;
-                box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
-            }}
-            .header {{
-                text-align: center;
-                padding-bottom: 20px;
-                border-bottom: 3px solid #28a0cc;
-                margin-bottom: 25px;
-            }}
-            .header img {{
-                max-width: 200px;
-                height: auto;
-            }}
-            .content {{
-                font-size: 15px;
-            }}
-            .highlight {{
-                color: #0066cc;
-                font-weight: bold;
-                font-size: 16px;
-            }}
-            .policy-box {{
-                background-color: #fdfaf0;
-                border-left: 4px solid #f0ad4e;
-                padding: 20px 25px;
-                margin: 25px 0;
-                border-radius: 0 8px 8px 0;
-            }}
-            .policy-box ul {{
-                margin: 0;
-                padding-left: 20px;
-            }}
-            .policy-box li {{
-                margin-bottom: 12px;
-                font-size: 14px;
-            }}
-            .contact-box {{
-                background-color: #e3f2fd;
-                padding: 25px;
-                border-radius: 8px;
-                margin-top: 30px;
-                text-align: center;
-                border: 1px solid #bbdefb;
-            }}
-            .contact-email {{
-                font-size: 20px;
-                font-weight: bold;
-                color: #475da4;
-                margin: 8px 15px;
-                display: inline-block;
-                text-decoration: none;
-            }}
-            .footer {{
-                text-align: center;
-                font-size: 12px;
-                color: #666666;
-                margin-top: 35px;
-                padding-top: 20px;
-                border-top: 1px solid #e0e0e0;
-            }}
+            body {{ font-family: 'Segoe UI', Arial, sans-serif; color: #333333; background-color: #f4f4f4; margin: 0; padding: 0; line-height: 1.6; }}
+            .container {{ max-width: 900px; margin: 30px auto; background-color: #ffffff; padding: 40px 50px; border-radius: 10px; box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1); }}
+            .header {{ text-align: center; padding-bottom: 20px; border-bottom: 3px solid #28a0cc; margin-bottom: 25px; }}
+            .header img {{ max-width: 200px; height: auto; }}
+            .content {{ font-size: 15px; }}
+            .highlight {{ color: #0066cc; font-weight: bold; font-size: 16px; }}
+            .policy-box {{ background-color: #fdfaf0; border-left: 4px solid #f0ad4e; padding: 20px 25px; margin: 25px 0; border-radius: 0 8px 8px 0; }}
+            .policy-box ul {{ margin: 0; padding-left: 20px; }}
+            .policy-box li {{ margin-bottom: 12px; font-size: 14px; }}
+            .contact-box {{ background-color: #e3f2fd; padding: 25px; border-radius: 8px; margin-top: 30px; text-align: center; border: 1px solid #bbdefb; }}
+            .contact-email {{ font-size: 20px; font-weight: bold; color: #475da4; margin: 8px 15px; display: inline-block; text-decoration: none; }}
+            .footer {{ text-align: center; font-size: 12px; color: #666666; margin-top: 35px; padding-top: 20px; border-top: 1px solid #e0e0e0; }}
+            .firma-img {{ max-width: 350px; height: auto; margin-top: 15px; display: block; }}
         </style>
     </head>
     <body>
@@ -180,6 +209,8 @@ def get_email_html(
                 <p>Adjunto estado de cuenta para su revisión y cancelación de lo vencido mayor al plazo establecido de {plazo_dias} días.</p>
 
                 {resumen_html}
+                
+                {cuentas_bancarias_html}
 
                 <div class="policy-box">
                     <p style="margin-top: 0; font-weight: bold; color: #b8860b;">Favor tener presente estos puntos esenciales de nuestra política de crédito:</p>
@@ -207,11 +238,10 @@ def get_email_html(
 
                 <p style="margin-top: 30px;">Gracias.</p>
 
-                <p>
-                    Atentamente,<br><br>
-                    <strong>HAZEL SOZA</strong><br>
-                    <span style="color: #475da4; font-weight: bold;">QUIMICAS UNIDAS</span>
-                </p>
+                <div>
+                    Atentamente,<br>
+                    <img src="cid:firma_asistente" alt="Asistente Digital - Químicas Unidas" class="firma-img">
+                </div>
             </div>
 
             <div class="footer">
@@ -231,10 +261,6 @@ def get_email_html(
 
 
 class EmailSenderCXC:
-    """
-    Clase para enviar correos usando Microsoft Graph API.
-    """
-
     def __init__(self):
         self.token = None
         self.sender_email = SENDER_EMAIL
@@ -248,13 +274,10 @@ class EmailSenderCXC:
             )
 
     def get_access_token(self) -> str:
-        """Obtiene token de acceso de Azure AD."""
         authority = f"https://login.microsoftonline.com/{TENANT_ID}"
-
         app = ConfidentialClientApplication(
             client_id=CLIENT_ID, client_credential=CLIENT_SECRET, authority=authority
         )
-
         token_response = app.acquire_token_for_client(
             scopes=["https://graph.microsoft.com/.default"]
         )
@@ -277,46 +300,22 @@ class EmailSenderCXC:
         plazo_dias: int = 30,
         ruta_excel: str = None,
     ) -> bool:
-        """
-        Envía el estado de cuenta por correo.
 
-        Args:
-            destinatarios: Lista de correos destinatarios
-            nombre_cliente: Nombre del cliente
-            codigo_cliente: Código del cliente
-            ruta_pdf: Ruta al archivo PDF
-            datos: Datos del cliente (para personalización)
-            cc_email: Correo en copia (opcional)
-
-        Returns:
-            True si se envió correctamente
-        """
-        # Validaciones
         if not destinatarios:
-            print(f"   ❌ Sin destinatarios para {codigo_cliente}")
             return False
-
         if not os.path.exists(ruta_pdf):
-            print(f"   ❌ PDF no encontrado: {ruta_pdf}")
             return False
-
-        # Obtener token si no existe
         if not self.token:
             try:
                 self.get_access_token()
-            except Exception as e:
-                print(f"   ❌ Error de autenticación: {e}")
+            except:
                 return False
 
-        # Preparar destinatarios
         to_recipients = [
             {"emailAddress": {"address": email.strip()}} for email in destinatarios
         ]
-
-        # Generar HTML
         body_html = get_email_html(nombre_cliente, datos, plazo_dias)
 
-        # Construir mensaje
         message = {
             "subject": f"Químicas Unidas - Estado de Cuenta - {nombre_cliente}",
             "body": {"contentType": "HTML", "content": body_html},
@@ -324,11 +323,10 @@ class EmailSenderCXC:
             "attachments": [],
         }
 
-        # Agregar CC si existe
         if cc_email:
             message["ccRecipients"] = [{"emailAddress": {"address": cc_email}}]
 
-        # Adjuntar logo si existe
+        # 1. Adjuntar Logo
         if os.path.exists(RUTA_LOGO):
             try:
                 with open(RUTA_LOGO, "rb") as f:
@@ -344,47 +342,58 @@ class EmailSenderCXC:
                     }
                 )
             except Exception as e:
-                print(f"   ⚠️ Error adjuntando logo: {e}")
+                print(f"   ⚠️ Error adjuntando logo: {e}")
 
-        # Adjuntar PDF
+        # 2. Adjuntar Firma GIF Animada
+        if os.path.exists(RUTA_FIRMA):
+            try:
+                with open(RUTA_FIRMA, "rb") as f:
+                    firma_b64 = base64.b64encode(f.read()).decode("utf-8")
+                message["attachments"].append(
+                    {
+                        "@odata.type": "#microsoft.graph.fileAttachment",
+                        "name": "firma.gif",
+                        "contentType": "image/gif",
+                        "contentBytes": firma_b64,
+                        "contentId": "firma_asistente",
+                        "isInline": True,
+                    }
+                )
+            except Exception as e:
+                print(f"   ⚠️ Error adjuntando firma: {e}")
+
+        # 3. Adjuntar PDF
         try:
             with open(ruta_pdf, "rb") as f:
                 pdf_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-            pdf_filename = os.path.basename(ruta_pdf)
             message["attachments"].append(
                 {
                     "@odata.type": "#microsoft.graph.fileAttachment",
-                    "name": pdf_filename,
+                    "name": os.path.basename(ruta_pdf),
                     "contentType": "application/pdf",
                     "contentBytes": pdf_b64,
                 }
             )
-        except Exception as e:
-            print(f"   ❌ Error leyendo PDF: {e}")
+        except:
             return False
 
+        # 4. Adjuntar Excel
         if ruta_excel and os.path.exists(ruta_excel):
             try:
                 with open(ruta_excel, "rb") as f:
                     excel_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-                excel_filename = os.path.basename(ruta_excel)
                 message["attachments"].append(
                     {
                         "@odata.type": "#microsoft.graph.fileAttachment",
-                        "name": excel_filename,
+                        "name": os.path.basename(ruta_excel),
                         "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         "contentBytes": excel_b64,
                     }
                 )
-            except Exception as e:
-                print(f"   ⚠️ Error adjuntando Excel: {e}")
-                # No es crítico, continúa sin Excel
+            except:
+                pass
 
-        # Enviar correo
         email_msg = {"message": message, "saveToSentItems": "true"}
-
         url = f"https://graph.microsoft.com/v1.0/users/{self.sender_email}/sendMail"
         headers = {
             "Authorization": f"Bearer {self.token}",
@@ -393,45 +402,22 @@ class EmailSenderCXC:
 
         try:
             response = requests.post(url, headers=headers, json=email_msg)
-
-            if response.status_code == 202:
-                print(f"   ✅ Correo enviado a: {', '.join(destinatarios)}")
-                return True
-            else:
-                print(
-                    f"   ❌ Error enviando: {response.status_code} - {response.text[:100]}"
-                )
-                return False
-
-        except Exception as e:
-            print(f"   ❌ Error de conexión: {e}")
+            return response.status_code == 202
+        except:
             return False
 
     def enviar_control_interno(
         self, destinatarios: List[str], archivos: List[str], stats: Dict = None
     ) -> bool:
-        """
-        Envía correo de control interno con los archivos generados.
-
-        Args:
-            destinatarios: Lista de correos
-            archivos: Lista de rutas a archivos adjuntos
-            stats: Estadísticas del proceso (opcional)
-
-        Returns:
-            True si se envió correctamente
-        """
         if not self.token:
             try:
                 self.get_access_token()
-            except Exception as e:
-                print(f"   Error de autenticacion: {e}")
+            except:
                 return False
 
         fecha = datetime.now().strftime("%d/%m/%Y")
         hora = datetime.now().strftime("%I:%M %p")
 
-        # Construir resumen de stats si está disponible
         stats_html = ""
         if stats:
             stats_html = f"""
@@ -449,43 +435,23 @@ class EmailSenderCXC:
         body_html = f"""
             <!DOCTYPE html>
             <html>
-            <head>
-                <meta charset="UTF-8">
-            </head>
             <body style="font-family: 'Segoe UI', Arial, sans-serif; color: #333; background-color: #f4f4f4; margin: 0; padding: 0;">
-                <div style="max-width: 700px; margin: 20px auto; background-color: #fff; padding: 30px; border-radius: 10px; box-shadow: 0px 4px 12px rgba(0,0,0,0.1);">
+                <div style="max-width: 700px; margin: 20px auto; background-color: #fff; padding: 30px; border-radius: 10px;">
                     <div style="text-align: center; padding-bottom: 20px; border-bottom: 3px solid #28a0cc; margin-bottom: 25px;">
                         <h1 style="color: #475da4; margin: 0;">Quimicas Unidas Ltda.</h1>
                         <h2 style="color: #666; font-weight: normal; margin: 5px 0 0 0;">Log de Control - Estados de Cuenta</h2>
                     </div>
-                    
                     <p>Se ha completado la ejecucion del proceso de Estados de Cuenta.</p>
-                    
                     <p><strong>Fecha:</strong> {fecha} a las {hora}</p>
-                    
                     {stats_html}
-                    
-                    <p>Se adjunta el documento PDF con el detalle completo:</p>
-                    <ul>
-                        <li>Resumen ejecutivo con totales de cartera</li>
-                        <li>Detalle por cliente</li>
-                        <li>Alertas de atencion requerida</li>
-                        <li>Top 10 clientes con mayor saldo</li>
-                    </ul>
-                    
-                    <div style="text-align: center; font-size: 12px; color: #666; margin-top: 25px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
-                        <p>Este es un correo automatico - Sistema RPA</p>
-                        <p>Quimicas Unidas Ltda. - Departamento de Credito y Cobro</p>
-                    </div>
+                    <p>Se adjunta el documento PDF con el detalle completo.</p>
                 </div>
             </body>
             </html>
             """
-
         to_recipients = [
             {"emailAddress": {"address": email.strip()}} for email in destinatarios
         ]
-
         message = {
             "subject": f"Control Estados de Cuenta - {datetime.now().strftime('%d/%m/%Y')}",
             "body": {"contentType": "HTML", "content": body_html},
@@ -493,53 +459,38 @@ class EmailSenderCXC:
             "attachments": [],
         }
 
-        # Adjuntar archivos
         for ruta in archivos:
             if ruta and os.path.exists(ruta):
                 try:
                     with open(ruta, "rb") as f:
-                        contenido_b64 = base64.b64encode(f.read()).decode("utf-8")
-
+                        cont_b64 = base64.b64encode(f.read()).decode("utf-8")
                     ext = ruta.split(".")[-1].lower()
-                    content_types = {
+                    ctypes = {
                         "pdf": "application/pdf",
                         "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         "xls": "application/vnd.ms-excel",
                     }
-
                     message["attachments"].append(
                         {
                             "@odata.type": "#microsoft.graph.fileAttachment",
                             "name": os.path.basename(ruta),
-                            "contentType": content_types.get(
-                                ext, "application/octet-stream"
-                            ),
-                            "contentBytes": contenido_b64,
+                            "contentType": ctypes.get(ext, "application/octet-stream"),
+                            "contentBytes": cont_b64,
                         }
                     )
-                except Exception as e:
-                    print(f"⚠️ Error adjuntando {ruta}: {e}")
+                except:
+                    pass
 
         email_msg = {"message": message, "saveToSentItems": "true"}
-
         url = f"https://graph.microsoft.com/v1.0/users/{self.sender_email}/sendMail"
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
-
         try:
             response = requests.post(url, headers=headers, json=email_msg)
-
-            if response.status_code == 202:
-                print(f"✅ Control enviado a: {', '.join(destinatarios)}")
-                return True
-            else:
-                print(f"❌ Error enviando control: {response.status_code}")
-                return False
-
-        except Exception as e:
-            print(f"❌ Error de conexión: {e}")
+            return response.status_code == 202
+        except:
             return False
 
 
@@ -560,44 +511,30 @@ def enviar_estado_cuenta(
     try:
         sender = EmailSenderCXC()
         return sender.enviar_estado_cuenta(
-            destinatarios=destinatarios,
-            nombre_cliente=nombre_cliente,
-            codigo_cliente=codigo_cliente,
-            ruta_pdf=ruta_pdf,
-            datos=datos,
+            destinatarios,
+            nombre_cliente,
+            codigo_cliente,
+            ruta_pdf,
+            datos,
             plazo_dias=plazo_dias,
             ruta_excel=ruta_excel,
         )
-    except Exception as e:
-        print(f"   ❌ Error: {e}")
+    except:
         return False
 
 
-# =============================================================================
-# PLANTILLA HTML PARA AGENTES
-# =============================================================================
-
-
 def get_agent_email_html(nombre_agente: str, fecha: str) -> str:
-    """Genera el HTML para el correo que recibe el agente."""
     return f"""
     <html>
     <body style="font-family: 'Segoe UI', Arial, sans-serif; color: #333; line-height: 1.6;">
         <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
-            <div style="background-color: #475da4; color: white; padding: 20px; text-align: center;">
-                <h2 style="margin: 0;">Reporte de Gira y Cobro</h2>
-            </div>
+            <div style="background-color: #475da4; color: white; padding: 20px; text-align: center;"><h2 style="margin: 0;">Reporte de Gira y Cobro</h2></div>
             <div style="padding: 25px;">
                 <p>Hola <strong>{nombre_agente}</strong>,</p>
                 <p>Se adjunta el reporte consolidado de clientes con saldos pendientes para su gestión de cobro en campo.</p>
                 <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; border-left: 4px solid #28a0cc;">
                     <p style="margin: 0;"><strong>Fecha de Generación:</strong> {fecha}</p>
-                    <p style="margin: 5px 0 0 0;"><strong>Contenido:</strong> Detalle de facturas por cliente y zona.</p>
                 </div>
-                <p style="margin-top: 20px;">Por favor, utiliza este documento para coordinar las visitas y reportar cualquier gestión al departamento de Crédito.</p>
-            </div>
-            <div style="background-color: #f4f4f4; color: #777; padding: 15px; text-align: center; font-size: 12px;">
-                Este es un envío automático del Sistema RPA - Químicas Unidas Ltda.
             </div>
         </div>
     </body>
@@ -605,55 +542,29 @@ def get_agent_email_html(nombre_agente: str, fecha: str) -> str:
     """
 
 
-# =============================================================================
-# CLASE PARA ENVÍO A AGENTES
-# =============================================================================
-
-
 class EmailSenderAgente(EmailSenderCXC):
-    """
-    Hereda de EmailSenderCXC para reutilizar la autenticación de Graph API,
-    pero especializada en reportes de gira.
-    """
-
     def enviar_reporte_gira(
         self, destinatario: str, nombre_agente: str, ruta_pdf: str, cc: List[str] = None
     ) -> bool:
-        """
-        Envía el PDF consolidado al agente con copias (CC) opcionales.
-        """
         if not destinatario or "@" not in destinatario:
-            print(
-                f"   ⚠️ Agente {nombre_agente} sin correo válido. No se puede enviar."
-            )
             return False
-
         if not self.token:
             self.get_access_token()
-
         fecha_str = datetime.now().strftime("%d/%m/%Y")
         body_html = get_agent_email_html(nombre_agente, fecha_str)
-
         message = {
             "subject": f"Reporte de Gira - Cobros - {nombre_agente} - {fecha_str}",
             "body": {"contentType": "HTML", "content": body_html},
             "toRecipients": [{"emailAddress": {"address": destinatario.strip()}}],
             "attachments": [],
         }
-
-        # NUEVO: Agregar destinatarios en copia (CC)
         if cc:
             message["ccRecipients"] = [
                 {"emailAddress": {"address": email.strip()}} for email in cc
             ]
-
-        # Adjuntar PDF
         try:
             with open(ruta_pdf, "rb") as f:
-                import base64
-
                 pdf_b64 = base64.b64encode(f.read()).decode("utf-8")
-
             message["attachments"].append(
                 {
                     "@odata.type": "#microsoft.graph.fileAttachment",
@@ -662,28 +573,23 @@ class EmailSenderAgente(EmailSenderCXC):
                     "contentBytes": pdf_b64,
                 }
             )
-        except Exception as e:
-            print(f"   ❌ Error adjuntando PDF al reporte: {e}")
+        except:
             return False
-
         url = f"https://graph.microsoft.com/v1.0/users/{self.sender_email}/sendMail"
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
-
         response = requests.post(url, headers=headers, json={"message": message})
         return response.status_code == 202
 
 
-# Función de conveniencia (similar a la de CXC)
 def enviar_email_agente(
     destinatario: str, nombre_agente: str, ruta_pdf: str, cc: List[str] = None
 ) -> bool:
-    """Función de conveniencia para enviar el reporte al agente."""
     try:
-        sender = EmailSenderAgente()
-        return sender.enviar_reporte_gira(destinatario, nombre_agente, ruta_pdf, cc)
-    except Exception as e:
-        print(f"   ❌ Error en enviar_email_agente: {e}")
+        return EmailSenderAgente().enviar_reporte_gira(
+            destinatario, nombre_agente, ruta_pdf, cc
+        )
+    except:
         return False

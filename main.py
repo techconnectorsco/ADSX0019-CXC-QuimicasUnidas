@@ -246,6 +246,38 @@ def obtener_contacto_principal(
     return {"nombre": "", "telefono": "", "email": ""}
 
 
+def ejecutar_sql_sl(
+    conn: ServiceLayerConnection, sql: str, code: str = "QU_PR_TMP"
+) -> List[Dict]:
+    """
+    Ejecuta un query SQL crudo en Service Layer mediante el endpoint SQLQueries.
+    """
+    url = f"{conn.base_url}/SQLQueries"
+
+    # 1. Intentar borrar por si quedó basura de una ejecución anterior
+    try:
+        conn.session.delete(f"{url}('{code}')")
+    except:
+        pass
+
+    # 2. Crear la consulta
+    resp = conn.session.post(
+        url, json={"SqlCode": code, "SqlName": "Query Temporal PR", "SqlText": sql}
+    )
+
+    if resp.status_code not in (200, 201):
+        print(f"   ⚠️ Error creando SQL: {resp.text[:200]}")
+        return []
+
+    # 3. Ejecutar y obtener resultados
+    res = conn.get(f"SQLQueries('{code}')/List", {})
+
+    # 4. Limpiar (borrar la consulta)
+    conn.session.delete(f"{url}('{code}')")
+
+    return res.get("value", []) if res else []
+
+
 def obtener_codigos_familia(conn: ServiceLayerConnection, card_code: str) -> List[str]:
     """Obtiene el código padre y los códigos de todas sus cuentas hijas."""
     codigos = [card_code]
@@ -303,59 +335,56 @@ def obtener_documentos_cliente(
             documentos.append(doc)
 
     # -------------------------------------------------------------------------
-    # 4. PAGOS RECIBIDOS CON SOBRANTE (PR)
+    # 4. SALDOS A FAVOR NO APLICADOS (Lectura directa de Asientos - JDT1)
     # -------------------------------------------------------------------------
-    pagos = obtener_todos_paginado(
-        conn,
-        "IncomingPayments",
-        {
-            "$filter": f"({filtro_codigos}) and Cancelled eq 'tNO'",
-            "$select": "DocNum,DocDate,TransferSum,CashSum,DocCurrency,PaymentInvoices,Remarks,Reference1",
-        },
-        "DocDate",
-    )
+    # Formatear lista de clientes (Padre e Hijas) para el IN de SQL: 'C0223','C0224'
+    lista_in = ", ".join([f"'{c}'" for c in codigos_familia])
 
-    for p in pagos:
-        # 1. Sumar los métodos de pago (Efectivo + Transferencia, etc.)
-        total_pagado = float(p.get("TransferSum", 0) or 0) + float(
-            p.get("CashSum", 0) or 0
-        )
+    # Traemos líneas de crédito con saldo pendiente mayor a cero desde 2024
+    sql_pr = f"""
+        SELECT 
+            T0."RefDate", 
+            T0."BaseRef" AS "DocNum", 
+            T0."TransType", 
+            T0."BalDueCred", 
+            T0."BalFcCred", 
+            T0."FCCurrency", 
+            T0."LineMemo" 
+        FROM "JDT1" T0 
+        WHERE T0."ShortName" IN ({lista_in}) 
+          AND T0."BalDueCred" > 0 
+          AND T0."RefDate" >= '20240101'
+    """
 
-        # 2. Sumar lo que sí se aplicó a facturas
-        suma_aplicada = 0
-        for inv in p.get("PaymentInvoices", []):
-            suma_aplicada += float(inv.get("SumApplied", 0) or 0)
+    filas_pr = ejecutar_sql_sl(conn, sql_pr)
 
-        # 3. El sobrante es la diferencia redondeada a 2 decimales (para evitar errores de punto flotante)
-        sobrante = round(total_pagado - suma_aplicada, 2)
+    for r in filas_pr:
+        moneda_linea = r.get("FCCurrency")
 
-        # Si hay un sobrante real a favor del cliente
+        # Determinar si el sobrante es en Dólares o Colones
+        if moneda_linea in ["USD", "US$", "DOL"]:
+            moneda_pago = "USD"
+            sobrante = float(r.get("BalFcCred", 0) or 0)
+        else:
+            moneda_pago = "CRC"
+            sobrante = float(r.get("BalDueCred", 0) or 0)
+
         if sobrante > 0.05:
-            fecha_pago = str(p.get("DocDate", ""))[:10]
-
-            # =================================================================
-            # FILTRO PARA EXCLUIR PRs MUY VIEJOS (A petición de Tania)
-            # Cambia este año límite según lo que ella te indique.
-            # =================================================================
-            anio_pago = int(fecha_pago[:4])
-            if anio_pago < 2024:
-                continue  # Salta los sobrantes de 2022 o anteriores
-            # =================================================================
-
-            moneda_pago = "CRC" if p.get("DocCurrency") in ["COL", "CRC"] else "USD"
+            fecha_pago = str(r.get("RefDate", ""))[:10]
+            memo = r.get("LineMemo") or "Saldo a favor no aplicado"
 
             doc_pr = {
-                "doc_num": p.get("DocNum"),
-                "doc_entry": p.get("DocNum"),
-                "consecutivo_fe": p.get("Reference1", ""),
+                "doc_num": r.get("DocNum"),
+                "doc_entry": r.get("DocNum"),
+                "consecutivo_fe": "",
                 "tipo_codigo": "PR",
                 "tipo_texto": "Pago a Favor (Sobrante)",
-                "descripcion": p.get("Remarks", "Saldo a favor no aplicado"),
+                "descripcion": memo[:76],
                 "series": [],
                 "fecha": fecha_pago,
                 "fecha_vence": fecha_pago,
-                "total": -abs(sobrante),  # Negativo porque resta la deuda
-                "saldo": -abs(sobrante),  # Negativo porque resta la deuda
+                "total": -abs(sobrante),  # Negativo porque es a favor
+                "saldo": -abs(sobrante),  # Negativo porque es a favor
                 "moneda": moneda_pago,
                 "dias_vencido": 0,
                 "esta_vencido": False,
@@ -763,7 +792,8 @@ def ejecutar_proceso_cxc(
             print(f"\n[{i}/{len(clientes)}] {card_code} - {card_name}")
 
             # Verificar si permite envío automático
-            if not cliente_permite_envio(cliente):
+            # BYPASS: Si pasamos un cliente por consola/API (lista_clientes), ignoramos el bloqueo de SAP.
+            if not cliente_permite_envio(cliente) and not lista_clientes:
                 print(f"   ⏭️ Envío automático deshabilitado")
                 log_control.agregar_registro(
                     codigo=card_code,

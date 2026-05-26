@@ -1,0 +1,31 @@
+REPORTE DE VERIFICACIÓN: CORREOS DE AGENTES EN SAP
+=====================================================================================
+
+✅ AGENTES CON CORREO ASIGNADO (3)
+-------------------------------------------------------------------------------------
+ID    | NOMBRE DEL AGENTE                        | CORREO
+-------------------------------------------------------------------------------------
+6     | Siviany González                         | sgonzalez@qu.cr
+7     | Berny Marín Chavez                       | bmarin@qu.cr
+9     | José Chacón                              | jchacon@qu.cr
+
+
+🚫 AGENTES SIN CORREO (13)
+-------------------------------------------------------------------------------------
+ID    | NOMBRE DEL AGENTE                        | ESTADO
+-------------------------------------------------------------------------------------
+1     | Allan Rodríguez Arias                    | VACÍO
+2     | Cristian Solano Romero                   | VACÍO
+3     | Douglas Araya Artavia                    | VACÍO
+4     | Wilkerth Morales Madrigal                | VACÍO
+5     | Ashley Azofeifa                          | VACÍO
+8     | Carlos Alvarado Araya                    | VACÍO
+10    | Axel Puschendorf                         | VACÍO
+11    | Crédito                                  | VACÍO
+12    | Agrotech                                 | VACÍO
+13    | Ninguno                                  | VACÍO
+14    | Eddy Sanabria Muñoz                      | VACÍO
+15    | José Solano                              | VACÍO
+16    | Caso Abogado                             | VACÍO
+
+=====================================================================================

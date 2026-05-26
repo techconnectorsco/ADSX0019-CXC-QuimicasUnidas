@@ -25,7 +25,7 @@ EMAIL_PRUEBA = "devs@techconnectors.co"
 MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
 
 # AGENTES PERMITIDOS: Siviany (6), Berny (7), José (9)
-AGENTES_VALIDOS = {6, 7, 9}
+# AGENTES_VALIDOS = {6, 7, 9}
 
 # CORREOS EN COPIA (CC) SOLICITADOS POR TANIA
 CORREOS_CC = [
@@ -223,6 +223,33 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
     }
 
 
+def ejecutar_sql_sl(
+    conn: ServiceLayerConnection, sql: str, code: str = "QU_PR_TMP"
+) -> List[Dict]:
+    """
+    Ejecuta un query SQL crudo en Service Layer mediante el endpoint SQLQueries.
+    """
+    url = f"{conn.base_url}/SQLQueries"
+
+    try:
+        conn.session.delete(f"{url}('{code}')")
+    except:
+        pass
+
+    resp = conn.session.post(
+        url, json={"SqlCode": code, "SqlName": "Query Temporal PR", "SqlText": sql}
+    )
+
+    if resp.status_code not in (200, 201):
+        print(f"   ⚠️ Error creando SQL: {resp.text[:200]}")
+        return []
+
+    res = conn.get(f"SQLQueries('{code}')/List", {})
+    conn.session.delete(f"{url}('{code}')")
+
+    return res.get("value", []) if res else []
+
+
 def obtener_documentos_cliente(
     conn: ServiceLayerConnection, card_code: str
 ) -> List[Dict]:
@@ -257,53 +284,46 @@ def obtener_documentos_cliente(
             documentos.append(doc)
 
     # -------------------------------------------------------------------------
-    # PAGOS RECIBIDOS CON SOBRANTE (PR) - Filtro < 2024
+    # SALDOS A FAVOR NO APLICADOS (Lectura directa de Asientos - JDT1)
     # -------------------------------------------------------------------------
-    pagos = obtener_todos_paginado(
-        conn,
-        "IncomingPayments",
-        {
-            "$filter": f"CardCode eq '{card_code}' and Cancelled eq 'tNO'",
-            "$select": "DocNum,DocDate,TransferSum,CashSum,DocCurrency,PaymentInvoices,PaymentChecks,Remarks,Reference1",
-        },
-        "DocDate",
-    )
+    sql_pr = f"""
+        SELECT 
+            T0."RefDate", 
+            T0."BaseRef" AS "DocNum", 
+            T0."TransType", 
+            T0."BalDueCred", 
+            T0."BalFcCred", 
+            T0."FCCurrency", 
+            T0."LineMemo" 
+        FROM "JDT1" T0 
+        WHERE T0."ShortName" = '{card_code}' 
+          AND T0."BalDueCred" > 0 
+          AND T0."RefDate" >= '20240101'
+    """
 
-    for p in pagos:
-        # Sumar Efectivo + Transferencia + Cheques
-        efectivo = float(p.get("CashSum", 0) or 0)
-        transferencia = float(p.get("TransferSum", 0) or 0)
-        cheques = sum(
-            float(chk.get("CheckSum", 0) or 0) for chk in p.get("PaymentChecks", [])
-        )
+    filas_pr = ejecutar_sql_sl(conn, sql_pr)
 
-        total_pagado = efectivo + transferencia + cheques
+    for r in filas_pr:
+        moneda_linea = r.get("FCCurrency")
 
-        # Sumar lo aplicado a facturas
-        suma_aplicada = sum(
-            float(inv.get("SumApplied", 0) or 0) for inv in p.get("PaymentInvoices", [])
-        )
+        # Determinar si el sobrante es en Dólares o Colones
+        if moneda_linea in ["USD", "US$", "DOL"]:
+            moneda_pago = "USD"
+            sobrante = float(r.get("BalFcCred", 0) or 0)
+        else:
+            moneda_pago = "CRC"
+            sobrante = float(r.get("BalDueCred", 0) or 0)
 
-        # Diferencia
-        sobrante = round(total_pagado - suma_aplicada, 2)
-
-        # Si hay sobrante real
         if sobrante > 0.05:
-            fecha_pago = str(p.get("DocDate", ""))[:10]
-            anio_pago = int(fecha_pago[:4])
-
-            # EXCLUIR SOBRANTES ANTERIORES A 2024
-            if anio_pago < 2024:
-                continue
-
-            moneda_pago = "CRC" if p.get("DocCurrency") in ["COL", "CRC"] else "USD"
+            fecha_pago = str(r.get("RefDate", ""))[:10]
+            memo = r.get("LineMemo") or "Saldo a favor no aplicado"
 
             doc_pr = {
-                "doc_num": p.get("DocNum"),
-                "consecutivo_fe": p.get("Reference1", ""),
+                "doc_num": r.get("DocNum"),
+                "consecutivo_fe": "",
                 "tipo_codigo": "PR",
                 "destino": "N/A",  # Los pagos no suelen tener destino/zona de envío
-                "descripcion": p.get("Remarks", "Saldo a favor no aplicado"),
+                "descripcion": memo[:76],
                 "fecha": fecha_pago,
                 "fecha_vence": fecha_pago,
                 "total": -abs(sobrante),
@@ -432,8 +452,14 @@ def ejecutar_reportes_gira():
 
         for cli in clientes:
             vendedor_id = cli.get("SalesPersonCode", -1)
-            # FILTRO CRÍTICO: Solo procesar los agentes válidos indicados por Tania
-            if vendedor_id not in AGENTES_VALIDOS:
+
+            # NUEVO FILTRO DINÁMICO:
+            # Buscamos si el vendedor existe y si tiene un correo válido en SAP.
+            # También ignoramos al vendedor -1 ("Ningún empleado").
+            info_vendedor = vendedores_cache.get(vendedor_id, {})
+            correo_agente = info_vendedor.get("correo", "")
+
+            if vendedor_id == -1 or not correo_agente or "@" not in str(correo_agente):
                 continue
 
             if vendedor_id not in agrupados_por_agente:
