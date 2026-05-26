@@ -139,18 +139,27 @@ def obtener_todos_paginado(
 
 
 def obtener_clientes_con_saldo(
-    conn: ServiceLayerConnection, limite: int = None
+    conn: ServiceLayerConnection, limite: int = None, lista_codigos: List[str] = None
 ) -> List[Dict]:
     """
     Obtiene clientes activos con saldo pendiente > 0.
-
-    Args:
-        conn: Conexión al Service Layer
-        limite: Si se especifica, limita la cantidad de clientes (para pruebas)
+    Si se pasa lista_codigos, filtra estrictamente por esos CardCodes.
     """
+    filtro_base = (
+        "CardType eq 'cCustomer' and Valid eq 'tYES' and CurrentAccountBalance ne 0"
+    )
+
+    # Si vienen clientes específicos desde la API o la consola
+    if lista_codigos:
+        # Crear filtro dinámico: (CardCode eq 'C0223' or CardCode eq 'C0250')
+        codigos_limpios = [c.strip() for c in lista_codigos if c.strip()]
+        filtro_extra = " or ".join([f"CardCode eq '{c}'" for c in codigos_limpios])
+        filtro_base += f" and ({filtro_extra})"
+
     params = {
-        "$filter": "CardType eq 'cCustomer' and Valid eq 'tYES' and CurrentAccountBalance ne 0",
+        "$filter": filtro_base,
         "$select": "CardCode,CardName,EmailAddress,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,U_NVT_CorreoEstadoCuenta,U_NTV_EnvioAutomatico,CreditLimit,ContactPerson,Address,PayTermsGrpCode,FreeText,Currency",
+        "$orderby": "CardCode",
     }
 
     if limite:
@@ -552,14 +561,18 @@ def determinar_correos_cliente(cliente: Dict) -> List[str]:
 def cliente_permite_envio(cliente: Dict) -> bool:
     """
     Verifica si el cliente tiene habilitado el envío automático.
-    Tania utiliza 'Y' (Sí) o 'N' (No) en SAP.
+    Maneja variaciones como 'Y', 'S', 'SI', 'SÍ', ignorando mayúsculas y espacios.
     """
-    envio_auto = cliente.get("U_NTV_EnvioAutomatico", "")
-    # Aceptamos 'Y' o 'S' por seguridad. Si no tiene nada, asumimos que no se envía.
+    envio_auto = cliente.get("U_NTV_EnvioAutomatico")
+
     if not envio_auto:
         return False
 
-    return envio_auto.upper() in ["Y", "S"]
+    # Convertimos a string, quitamos espacios en los bordes y pasamos a mayúsculas
+    valor_limpio = str(envio_auto).strip().upper()
+
+    # Aceptamos todas las variaciones válidas de "Sí"
+    return valor_limpio in ["Y", "S", "SI", "SÍ"]
 
 
 def calcular_rangos_vencimiento(documentos: List[Dict]) -> Dict:
@@ -690,7 +703,9 @@ def preparar_datos_cliente(conn: ServiceLayerConnection, cliente: Dict) -> Dict:
 # =============================================================================
 
 
-def ejecutar_proceso_cxc():
+def ejecutar_proceso_cxc(
+    lista_clientes: List[str] = None, modo_test_limite: bool = False
+):
     """
     Proceso principal de envío de estados de cuenta.
     Se ejecuta los días 15 y 30 de cada mes.
@@ -711,9 +726,11 @@ def ejecutar_proceso_cxc():
         log_control = ControlCXC()
 
         # 1. Obtener TODOS los clientes con saldo
-        print("\n📋 Obteniendo clientes con saldo pendiente...")
-        clientes = obtener_clientes_con_saldo(conn)
-        print(f"   Total clientes con saldo: {len(clientes)}")
+        print("\n📋 Obteniendo clientes...")
+        clientes = obtener_clientes_con_saldo(
+            conn, limite=2 if modo_test_limite else None, lista_codigos=lista_clientes
+        )
+        print(f"   Total clientes a procesar: {len(clientes)}")
 
         log_control.set_total_clientes(len(clientes))
 
@@ -721,8 +738,8 @@ def ejecutar_proceso_cxc():
         # DESARROLLO: Limitar a 2 clientes para pruebas
         # PRODUCCIÓN: Comentar o eliminar la siguiente línea
         # =====================================================================
-        clientes = clientes[:2]
-        print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
+        # clientes = clientes[:2]
+        # print(f"   ⚠️ MODO DESARROLLO: Procesando solo {len(clientes)} clientes")
         # =====================================================================
 
         if not clientes:
@@ -984,4 +1001,22 @@ def ejecutar_proceso_cxc():
 # =============================================================================
 
 if __name__ == "__main__":
-    ejecutar_proceso_cxc()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Automatización de Estados de Cuenta (CXC) - Químicas Unidas"
+    )
+    parser.add_argument(
+        "--test", action="store_true", help="Limitar a 2 clientes (modo desarrollo)"
+    )
+    parser.add_argument(
+        "--clientes",
+        type=str,
+        help="Ejecutar clientes específicos separados por coma. Ej: --clientes C0223,C0250",
+    )
+
+    args = parser.parse_args()
+
+    codigos = args.clientes.split(",") if args.clientes else None
+
+    ejecutar_proceso_cxc(lista_clientes=codigos, modo_test_limite=args.test)

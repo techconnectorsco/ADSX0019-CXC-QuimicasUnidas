@@ -1,0 +1,130 @@
+REPORTE DE VERIFICACIÓN: ENVÍO AUTOMÁTICO DE ESTADOS DE CUENTA
+==============================================================================================================
+
+✅ LISTA 1: CLIENTES QUE SÍ RECIBIRÁN EL ESTADO DE CUENTA (Tienen S, Y, SI)
+--------------------------------------------------------------------------------------------------------------
+CÓDIGO       | NOMBRE DEL CLIENTE                                                          | VALOR SAP
+--------------------------------------------------------------------------------------------------------------
+C0006        | AGRO COMERCIAL COLON S.A.                                                   | Y
+C0012        | AGRO UJARRAS S.A.                                                           | Y
+C0035        | ALMACEN AGROPECUARIO EL EXITO S.A.                                          | Y
+C0048        | ASOC. CAMARA PROD CAÑA PACIFICO                                             | Y
+C0059        | CAMARA DE GANADEROS DE SANTA CRUZ                                           | Y
+C0064        | CAMPOSANTO LA PIEDAD S.A.                                                   | Y
+C0067        | CARLOS DAVID SOTO MONTERO                                                   | Y
+C0072        | CENTRO AGRIC. CANT. DE ESPARZA                                              | Y
+C0075        | CENTRO AGRIC.CANTONAL DE PUNTARENAS                                         | Y
+C0078        | EQUIPOS AGRICOLAS VZ S.R.L.                                                 | Y
+C0082        | CENTRO AGRICOLA CANTONAL DE SANTO DOMINGO                                   | Y
+C0083        | CENTRO AGRICOLA CANTONAL DE SARCHI                                          | Y
+C0086        | CENTRO DE SERVICIO ESCALANTE GALLARDO S.A.                                  | Y
+C0099        | G MORA SIQUIRRES S.A.                                                       | Y
+C0100        | SERVICIOS MULTIPLES JADA S.A.                                               | Y
+C0101        | EQUIPOS AGROFORESTALES ELITEC                                               | Y
+C0108        | COOPE ATENAS R.L.                                                           | Y
+C0117        | COOPESABALITO R.L.                                                          | Y
+C0138        | CORPORACION COMERCIAL EL LAGAR S.A.                                         | Y
+C0143        | DANIEL GERARDO CORDOBA BARRIENTOS                                           | Y
+C0160        | EFRAIN GAITAN GAITAN                                                        | Y
+C0179        | EL COLONO ZONA NORTE S.A                                                    | Y
+C0187        | EQUIPOS VERSATILES DE SANTA CRUZ S. A                                       | Y
+C0189        | EVER EDUARDO MELENDEZ MADRIGAL                                              | Y
+C0191        | FERRETERIA BRENES S.A.                                                      | Y
+C0199        | HERRERA QUESADA JOSE RAMON                                                  | Y
+C0209        | G MORA GUACIMO S.A.                                                         | Y
+C0210        | GM CARIARI S.A.                                                             | Y
+C0211        | HACIENDA JUAN VIÑAS                                                         | Y
+C0223        | INVERSIONES JOTOCILLO S.A.                                                  | Y
+C0227        | PROMOTORA NASTIK S.A.                                                       | Y
+C0232        | JORGE JIMENEZ CARRERA                                                       | Y
+C0243        | MARIN VILLEGAS HUMBERTO                                                     | Y
+C0250        | CASTRO ALVAREZ WILLIAN                                                      | Y
+C0253        | MELVIN GAITAN ARTAVIA                                                       | Y
+C0254        | MENDEZ HIDALGO HEINER                                                       | Y
+C0273        | MURILLO ARGUEDAS FERNANDO                                                   | Y
+C0280        | OSVALDO SANCHO MORERA                                                       | Y
+C0281        | PAPAGAYO DO IT CENTER S.A.                                                  | Y
+C0300        | RAMIREZ ARGUEDAS ROY                                                        | Y
+C0314        | RUIZ ROJAS CARLOS ALBERTO                                                   | Y
+C0317        | SALAZAR DELGADO LUIS ANGEL                                                  | Y
+C0326        | SOLUCIONES TROPICALES CBSKM S.A.                                            | Y
+C0327        | SOTO CASTILLO JUAN MARTIN                                                   | Y
+C0333        | SUPER VETERINARIA DE LIBERIA, S.A.                                          | Y
+C0338        | TEC. AGRICOLAS LLANO LOS ANGELES S.A.                                       | Y
+C0360        | FRANCISCO JIMENEZ QUESADA                                                   | Y
+C0363        | ZARCERO AGRICOLA S.A.                                                       | Y
+C0367        | DISTRIBUIDORA AGRO COMERCIAL DE PURISCAL S.A.                               | Y
+C0398        | FRANCISCO JIMENEZ QUESADA                                                   | Y
+C0402        | UNIVERSAL HOPE INTERNACIONAL S.A.                                           | Y
+C0404        | JOSUE FERNANDEZ ROJAS                                                       | Y
+C0405        | LIZBETH ZUÑIGA MATAMOROS                                                    | Y
+C0406        | HERMANOS RUBI S.A.                                                          | Y
+C0409        | FRANCISCO JAVIER VARGAS SIBAJA                                              | Y
+C0414        | MARJORIE CERDAS FERNANDEZ                                                   | Y
+C0417        | BENILBERTH MORALES ROJAS                                                    | Y
+C0425        | JORGE ARTURO FERNANDEZ RODRIGUEZ                                            | Y
+C0427        | EL COLONO AGROPECUARIO S.A.                                                 | Y
+C0446        | CRENZ ANDRES STELLER HERRA                                                  | Y
+C0449        | KENNETH ESTEBAN GONZALEZ SANCHEZ                                            | Y
+C0470        | MOBILE TECH INTLA S.A.                                                      | Y
+C0471        | KATHYA RIVERA UGALDE                                                        | Y
+C0475        | ARIEL MORA LEITON                                                           | Y
+C0477        | MAILEX ML S.A.                                                              | Y
+C0483        | DISTRIBUIDORA JIMENEZ Y AGÜERO LTDA                                         | Y
+C0485        | AGRO SERVICIOS TRES C DEL ATLANTICO S.A.                                    | Y
+C0486        | CORPORACION BEJARANO Y ROMERO S.A.                                          | Y
+C0487        | AGROSERVICIOS Y MAQUINARIA AGRICOLA MENOR JYR S.R.L                         | Y
+C0489        | MARLON GUADAMUZ MEJIA                                                       | Y
+C0490        | INVERSIONES HERMANOS ALEMAN S.R.L.                                          | Y
+C0491        | COMPLEJO LAS ARENAS S.A.                                                    | Y
+C0495        | AGROINVERSIONES GREEN RAY S.A.                                              | Y
+C0497        | GRUPO MORA LA FORTUNA S.A.                                                  | Y
+C0498        | AGROCLINICA INTERNACIONAL S.A.                                              | Y
+C0499        | FRANCISCO JIMENEZ QUESADA                                                   | Y
+C0501        | CENTRO DE DISTRIBUCION GRUPO EL LAGAR S.A.                                  | Y
+C0502        | YONA S.A.                                                                   | Y
+C0503        | KATHERINE HERNANDEZ VILLALOBOS                                              | Y
+C0504        | FERRETERIA EPA S.A.                                                         | Y
+C0505        | MARLON OROZCO BARRIOS                                                       | Y
+C0507        | AGROCLINICA CARIARI S.A.                                                    | Y
+C0508        | LESTHER JOSE RIVERA SEVILLA                                                 | Y
+C0509        | MIGUEL ANGEL PEREZ VARELA                                                   | Y
+C0510        | DAVID GERARDO ARAYA ROJAS                                                   | Y
+CE9100       | AGRO HEREDAD S.A.                                                           | Y
+CE9108       | CORPORACION ARROCERA NACIONAL                                               | Y
+--------------------------------------------------------------------------------------------------------------
+Total a enviar: 87 clientes.
+
+
+🚫 LISTA 2: CLIENTES EXCLUIDOS DEL ENVÍO (Tienen N, NO, o campo Vacío)
+--------------------------------------------------------------------------------------------------------------
+CÓDIGO       | NOMBRE DEL CLIENTE                                 | VALOR SAP    | SCRIPT
+--------------------------------------------------------------------------------------------------------------
+C0040        | ALMACENES EL COLONO S.A.                           | N            | No Envia
+C0104        | COOP. DE ELECTRIF. RURAL DE GUANACASTE             | N            | No Envia explícito
+C0146        | DENIS SERRANO MENA                                 | N            | No Envia explícito
+C0161        | EL COLONO AGROPECUARIO S.A.                        | N            | No Envia explícito
+C0176        | EL COLONO LA JUNGLA S.A.                           | N            | No Envia explícito
+C0201        | GONZALEZ AVALOS SIVIANY                            | N            | No Envia explícito
+C0246        | MARIO J. VARGAS SALAZAR                            | N            | No Envia explícito
+C0257        | MERCADO DE MATERIALES EL TANQUE S.A.               | N            | No Envia explícito
+C0260        | MICHAEL SAAVEDRA CALDERON                          | N            | No Envia explícito
+C0292        | PUSCHENDORF FAHRENKRUG AXEL                        | N            | No Envia explícito
+C0294        | PUSCHENDORF ZIMMER ROLAND                          | N            | No Envia explícito
+C0296        | QUIMICAS UNIDAS LTDA                               | N            | No Envia explícito
+C0307        | RODRIGUEZ ARIAS ALLAN                              | N            | No Envia explícito
+C0320        | SILVA HIDALGO DAVID                                | N            | No Envia explícito
+C0324        | SOLANO ROMERO CRISTIAN                             | N            | No Envia explícito
+C0343        | THOMSEN BENDER JENS                                | N            | No Envia explícito
+C0346        | UNION COMERCIAL DE COSTA RICA UNICOMER S.A.        | N            | No Envia explícito
+CE9023       | EVONIK GUATEMALA S. A.                             | N            | No Envia explícito
+--------------------------------------------------------------------------------------------------------------
+Total excluidos: 18 clientes.
+
+
+==============================================================================================================
+RESUMEN GENERAL:
+ - Clientes procesados para enviar:  87
+ - Clientes restringidos/excluidos:  18
+ - Total de cuentas con saldo:       105
+==============================================================================================================

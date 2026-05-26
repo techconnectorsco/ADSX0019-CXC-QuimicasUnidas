@@ -1,0 +1,292 @@
+REPORTE COMPLETO DE AGENTES (SALES PERSONS)
+================================================================================
+
+👨‍💼 AGENTE ID: -1 - -Ningún empleado del departamento de ventas-
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : -1
+   SalesEmployeeName             : -Ningún empleado del departamento de ventas-
+   Remarks                       : None
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tYES
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 1 - Allan Rodríguez Arias
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 1
+   SalesEmployeeName             : Allan Rodríguez Arias
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 2 - Cristian Solano Romero
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 2
+   SalesEmployeeName             : Cristian Solano Romero
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 3 - Douglas Araya Artavia
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 3
+   SalesEmployeeName             : Douglas Araya Artavia
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 4 - Wilkerth Morales Madrigal
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 4
+   SalesEmployeeName             : Wilkerth Morales Madrigal
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tNO
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 5 - Ashley Azofeifa
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 5
+   SalesEmployeeName             : Ashley Azofeifa
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tNO
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 6 - Siviany González
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 6
+   SalesEmployeeName             : Siviany González
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 7 - Berny Marín Chavez
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 7
+   SalesEmployeeName             : Berny Marín Chavez
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 8 - Carlos Alvarado Araya
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 8
+   SalesEmployeeName             : Carlos Alvarado Araya
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tNO
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 9 - José Chacón
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 9
+   SalesEmployeeName             : José Chacón
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 10 - Axel Puschendorf
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 10
+   SalesEmployeeName             : Axel Puschendorf
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 11 - Crédito
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 11
+   SalesEmployeeName             : Crédito
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 12 - Agrotech
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 12
+   SalesEmployeeName             : Agrotech
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 13 - Ninguno
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 13
+   SalesEmployeeName             : Ninguno
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 14 - Eddy Sanabria Muñoz
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 14
+   SalesEmployeeName             : Eddy Sanabria Muñoz
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tNO
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 15 - José Solano
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 15
+   SalesEmployeeName             : José Solano
+   Remarks                       : 
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tNO
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
+👨‍💼 AGENTE ID: 16 - Caso Abogado
+--------------------------------------------------------------------------------
+   SalesEmployeeCode             : 16
+   SalesEmployeeName             : Caso Abogado
+   Remarks                       : None
+   CommissionForSalesEmployee    : 0.0
+   CommissionGroup               : 0
+   Locked                        : tNO
+   EmployeeID                    : None
+   Active                        : tYES
+   Telephone                     : None
+   Mobile                        : None
+   Fax                           : None
+   Email                         : None
+
+================================================================================
+
