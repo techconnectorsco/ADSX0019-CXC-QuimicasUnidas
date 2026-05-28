@@ -353,7 +353,7 @@ def obtener_documentos_cliente(
         FROM "JDT1" T0 
         WHERE T0."ShortName" IN ({lista_in}) 
           AND T0."BalDueCred" > 0 
-          AND T0."RefDate" >= '20240101'
+          AND T0."RefDate" >= '20220101'
     """
 
     filas_pr = ejecutar_sql_sl(conn, sql_pr)
