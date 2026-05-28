@@ -24,7 +24,7 @@ import uuid
 
 EMAIL_PRUEBA = "devs@techconnectors.co"
 # EMAIL_PRUEBA = "credito@qu.cr"
-MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
+MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
 
 # AGENTES PERMITIDOS: Siviany (6), Berny (7), José (9)
 # AGENTES_VALIDOS = {6, 7, 9}
@@ -32,10 +32,10 @@ MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al correo de
 # CORREOS EN COPIA (CC) SOLICITADOS POR TANIA
 CORREOS_CC = [
     "dev@soportexperto.com",
-    "erich.hoepker@qu.cr",
-    "apuschendorf@qu.cr",
-    "creditodenis@qu.cr",
-    "credito@qu.cr",
+    # "erich.hoepker@qu.cr",
+    # "apuschendorf@qu.cr",
+    # "creditodenis@qu.cr",
+    # "credito@qu.cr",
 ]
 
 TIPOS_QUE_RESTAN = {
@@ -291,18 +291,13 @@ def ejecutar_sql_sl(conn: ServiceLayerConnection, sql: str) -> List[Dict]:
 def obtener_documentos_cliente(
     conn: ServiceLayerConnection, cliente_info: Dict
 ) -> List[Dict]:
-    """
-    Obtiene los documentos del cliente y les asigna el Vendedor correcto
-    basado en su dirección de envío (U_CODV) o el vendedor general del cliente.
-    """
     documentos = []
     card_code = cliente_info.get("CardCode")
     vendedor_general = cliente_info.get("SalesPersonCode", -1)
 
-    # 1. Obtener el mapa de vendedores por dirección
     mapeo_dir = obtener_mapeo_direcciones(conn, card_code)
 
-    # 2. FACTURAS (Invoices)
+    # 1. FACTURAS (Invoices) - Aquí NO filtramos por fecha, la deuda vieja sigue siendo deuda
     facturas = obtener_todos_paginado(
         conn,
         "Invoices",
@@ -315,18 +310,17 @@ def obtener_documentos_cliente(
     for f in facturas:
         doc = procesar_documento(f, "invoice")
         if doc:
-            # MAGIA: Determinar de quién es esta factura
             destino = doc["destino"]
-            # Si el destino está en el mapa, usamos ese vendedor. Si no, usamos el general.
             doc["vendedor_final"] = mapeo_dir.get(destino, vendedor_general)
             documentos.append(doc)
 
-    # 3. NOTAS DE CRÉDITO (CreditNotes)
+    # 2. NOTAS DE CRÉDITO (CreditNotes) - AHORA CON FILTRO DESDE EL 2024
     notas_credito = obtener_todos_paginado(
         conn,
         "CreditNotes",
         {
-            "$filter": f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open'",
+            # AÑADIDO: DocDate ge '2024-01-01' para evitar la basura vieja del 2019
+            "$filter": f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open' and DocDate ge '2024-01-01'",
             "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,ShipToCode,DocumentLines",
         },
         "DocDueDate",
@@ -338,7 +332,8 @@ def obtener_documentos_cliente(
             doc["vendedor_final"] = mapeo_dir.get(destino, vendedor_general)
             documentos.append(doc)
 
-    # 4. SALDOS A FAVOR (Lectura directa de JDT1)
+    # 3. SALDOS A FAVOR (Lectura directa de JDT1 - Pagos y Asientos Manuales)
+    # AÑADIDO: T0."TransType" NOT IN ('13', '14') para evitar duplicar las Notas de Crédito
     sql_pr = f"""
         SELECT 
             T0."RefDate", 
@@ -351,7 +346,8 @@ def obtener_documentos_cliente(
         FROM "JDT1" T0 
         WHERE T0."ShortName" = '{card_code}' 
           AND T0."BalDueCred" > 0 
-          AND T0."RefDate" >= '20220101'
+          AND T0."RefDate" >= '20240101'
+          AND T0."TransType" NOT IN ('13', '14')
     """
 
     filas_pr = ejecutar_sql_sl(conn, sql_pr)
@@ -366,7 +362,13 @@ def obtener_documentos_cliente(
             sobrante = float(r.get("BalDueCred", 0) or 0)
 
         if sobrante > 0.05:
-            fecha_pago = str(r.get("RefDate", ""))[:10]
+            # FIX DE FECHAS: Convertir '20260526' a '2026-05-26'
+            raw_date = str(r.get("RefDate", ""))[:10]
+            if raw_date and "-" not in raw_date and len(raw_date) >= 8:
+                fecha_pago = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
+            else:
+                fecha_pago = raw_date
+
             memo = r.get("LineMemo") or "Saldo a favor no aplicado"
 
             doc_pr = {
@@ -383,7 +385,6 @@ def obtener_documentos_cliente(
                 "esta_vencido": False,
                 "dias_vencido": 0,
                 "orden_compra": "",
-                # Los PR no tienen ShipToCode, se asignan al vendedor general
                 "vendedor_final": vendedor_general,
             }
             documentos.append(doc_pr)
@@ -541,7 +542,7 @@ def ejecutar_reportes_gira():
         # =====================================================================
         # PROCESAMIENTO MULTIHILO (Para mayor velocidad)
         # =====================================================================
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             # Lanzamos todas las peticiones a SAP en paralelo
             futuros = {
                 executor.submit(procesar_datos_cliente, conn, cli): cli
@@ -601,11 +602,12 @@ def ejecutar_reportes_gira():
 
             print(f"\n👨‍💼 Procesando Agente: {nombre_agente} (ID: {vendedor_id})")
 
-            # Ordenar clientes de la gira
+            # Ordenar clientes para que el agente vea el mismo cliente agrupado junto
+            # Primero por Nombre, luego por Zona de Gira
             clientes_del_agente.sort(
                 key=lambda c: (
-                    str(c["cliente"].get("zona_gira") or "ZZZ").zfill(3),
                     c["cliente"].get("nombre", ""),
+                    str(c["cliente"].get("zona_gira") or "ZZZ").zfill(3),
                 )
             )
 

@@ -24,6 +24,7 @@ from generarpdf import generar_pdf_estado_cuenta
 from sendemailCXC import enviar_estado_cuenta
 from logcontrolcxc import ControlCXC
 from Generarexcel import generar_excel_estado_cuenta
+import uuid
 
 # =============================================================================
 # CONSTANTES
@@ -246,33 +247,26 @@ def obtener_contacto_principal(
     return {"nombre": "", "telefono": "", "email": ""}
 
 
-def ejecutar_sql_sl(
-    conn: ServiceLayerConnection, sql: str, code: str = "QU_PR_TMP"
-) -> List[Dict]:
+def ejecutar_sql_sl(conn: ServiceLayerConnection, sql: str) -> List[Dict]:
     """
     Ejecuta un query SQL crudo en Service Layer mediante el endpoint SQLQueries.
+    Versión segura: Usa UUID para evitar conflictos de nombres en ejecuciones concurrentes.
     """
+    code = f"QU_PR_{uuid.uuid4().hex[:8]}"
     url = f"{conn.base_url}/SQLQueries"
 
-    # 1. Intentar borrar por si quedó basura de una ejecución anterior
-    try:
-        conn.session.delete(f"{url}('{code}')")
-    except:
-        pass
-
-    # 2. Crear la consulta
+    # Crear la consulta con un nombre único temporal
     resp = conn.session.post(
         url, json={"SqlCode": code, "SqlName": "Query Temporal PR", "SqlText": sql}
     )
 
     if resp.status_code not in (200, 201):
-        print(f"   ⚠️ Error creando SQL: {resp.text[:200]}")
         return []
 
-    # 3. Ejecutar y obtener resultados
+    # Ejecutar y obtener resultados
     res = conn.get(f"SQLQueries('{code}')/List", {})
 
-    # 4. Limpiar (borrar la consulta)
+    # Limpiar inmediatamente la consulta de SAP
     conn.session.delete(f"{url}('{code}')")
 
     return res.get("value", []) if res else []
@@ -292,17 +286,16 @@ def obtener_documentos_cliente(
     conn: ServiceLayerConnection, card_code: str
 ) -> List[Dict]:
     """
-    Obtiene TODOS los documentos pendientes de un cliente y sus sucursales (hijas).
+    Obtiene TODOS los documentos pendientes de un cliente y sus sucursales (hijas),
+    filtrando duplicados contables, basura histórica y aplicando formato correcto de fechas.
     """
     documentos = []
 
     # 1. Obtener Padre e Hijas
     codigos_familia = obtener_codigos_familia(conn, card_code)
-
-    # Crear un filtro dinámico: (CardCode eq 'Padre' or CardCode eq 'Hija1' ...)
     filtro_codigos = " or ".join([f"CardCode eq '{c}'" for c in codigos_familia])
 
-    # 2. FACTURAS (Invoices)
+    # 2. FACTURAS (Invoices) - La deuda real vieja se mantiene intacta
     facturas = obtener_todos_paginado(
         conn,
         "Invoices",
@@ -318,12 +311,13 @@ def obtener_documentos_cliente(
         if doc:
             documentos.append(doc)
 
-    # 3. NOTAS DE CRÉDITO (CreditNotes)
+    # 3. NOTAS DE CRÉDITO (CreditNotes) - FILTRADAS DESDE 2024 PARA EVITAR RECLAMOS VIEJOS
     notas_credito = obtener_todos_paginado(
         conn,
         "CreditNotes",
         {
-            "$filter": f"({filtro_codigos}) and DocumentStatus eq 'bost_Open'",
+            # AÑADIDO: and DocDate ge '2024-01-01' para enterrar los casos 2018-2022 que mencionó Tania
+            "$filter": f"({filtro_codigos}) and DocumentStatus eq 'bost_Open' and DocDate ge '2024-01-01'",
             "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,DocumentLines",
         },
         "DocDueDate",
@@ -337,10 +331,11 @@ def obtener_documentos_cliente(
     # -------------------------------------------------------------------------
     # 4. SALDOS A FAVOR NO APLICADOS (Lectura directa de Asientos - JDT1)
     # -------------------------------------------------------------------------
-    # Formatear lista de clientes (Padre e Hijas) para el IN de SQL: 'C0223','C0224'
     lista_in = ", ".join([f"'{c}'" for c in codigos_familia])
 
-    # Traemos líneas de crédito con saldo pendiente mayor a cero desde 2024
+    # CONTROLES CRÍTICOS AÑADIDOS:
+    # - Filtro de fecha cambiado a >= '20240101'
+    # - TransType NOT IN ('13', '14') para que no jale los asientos de Facturas ni NCs (Cero Duplicados)
     sql_pr = f"""
         SELECT 
             T0."RefDate", 
@@ -353,24 +348,33 @@ def obtener_documentos_cliente(
         FROM "JDT1" T0 
         WHERE T0."ShortName" IN ({lista_in}) 
           AND T0."BalDueCred" > 0 
-          AND T0."RefDate" >= '20220101'
+          AND T0."RefDate" >= '20240101'
+          AND T0."TransType" NOT IN ('13', '14')
     """
 
     filas_pr = ejecutar_sql_sl(conn, sql_pr)
 
     for r in filas_pr:
+        # print(
+        #     f"   🔍 RAW SAP -> Asiento: {r.get('DocNum')} | Trans: {r.get('TransType')} | Moneda: {r.get('FCCurrency')} | Saldo CRC: {r.get('BalDueCred')} | Saldo USD: {r.get('BalFcCred')}"
+        # )
         moneda_linea = r.get("FCCurrency")
 
-        # Determinar si el sobrante es en Dólares o Colones
         if moneda_linea in ["USD", "US$", "DOL"]:
             moneda_pago = "USD"
-            sobrante = float(r.get("BalFcCred", 0) or 0)
+            sobrante = round(float(r.get("BalFcCred", 0) or 0), 2)
         else:
             moneda_pago = "CRC"
-            sobrante = float(r.get("BalDueCred", 0) or 0)
+            sobrante = round(float(r.get("BalDueCred", 0) or 0), 2)
 
         if sobrante > 0.05:
-            fecha_pago = str(r.get("RefDate", ""))[:10]
+            # FIX DE FECHAS: Convierte de forma segura el formato plano de SAP '20260526' a '2026-05-26'
+            raw_date = str(r.get("RefDate", ""))[:10]
+            if raw_date and "-" not in raw_date and len(raw_date) >= 8:
+                fecha_pago = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
+            else:
+                fecha_pago = raw_date
+
             memo = r.get("LineMemo") or "Saldo a favor no aplicado"
 
             doc_pr = {
@@ -383,8 +387,8 @@ def obtener_documentos_cliente(
                 "series": [],
                 "fecha": fecha_pago,
                 "fecha_vence": fecha_pago,
-                "total": -abs(sobrante),  # Negativo porque es a favor
-                "saldo": -abs(sobrante),  # Negativo porque es a favor
+                "total": -abs(sobrante),
+                "saldo": -abs(sobrante),
                 "moneda": moneda_pago,
                 "dias_vencido": 0,
                 "esta_vencido": False,
