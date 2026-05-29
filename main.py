@@ -146,9 +146,7 @@ def obtener_clientes_con_saldo(
     Obtiene clientes activos con saldo pendiente > 0.
     Si se pasa lista_codigos, filtra estrictamente por esos CardCodes.
     """
-    filtro_base = (
-        "CardType eq 'cCustomer' and Valid eq 'tYES' and CurrentAccountBalance ne 0"
-    )
+    filtro_base = "CardType eq 'cCustomer' and CurrentAccountBalance ne 0"
 
     # Si vienen clientes específicos desde la API o la consola
     if lista_codigos:

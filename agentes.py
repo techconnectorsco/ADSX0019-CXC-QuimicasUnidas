@@ -106,18 +106,62 @@ def obtener_todos_paginado(
 def obtener_clientes_con_saldo(
     conn: ServiceLayerConnection, limite: int = None
 ) -> List[Dict]:
-    # NUEVO FILTRO: Trae clientes con saldo != 0, O cuentas hijas, O Colonos/Gollos
-    filtro = "CardType eq 'cCustomer' and Valid eq 'tYES' and (CurrentAccountBalance ne 0 or FatherCard ne null or contains(CardName, 'COLONO') or contains(CardName, 'GOLLO') or contains(CardName, 'GOLLOS'))"
+    # NUEVO FILTRO UNIVERSAL:
+    # Clientes Activos/Inactivos que tengan saldo O que sean sucursales (FatherCard)
+    filtro = (
+        "CardType eq 'cCustomer' and (CurrentAccountBalance ne 0 or FatherCard ne null)"
+    )
+
     params = {
         "$filter": filtro,
         "$select": "CardCode,CardName,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,CreditLimit,ContactPerson,Address,Currency,FatherCard",
     }
+
     if limite:
         params["$top"] = limite
         clientes = conn.get("BusinessPartners", params)
         return clientes.get("value", []) if clientes else []
     else:
         return obtener_todos_paginado(conn, "BusinessPartners", params, "CardCode")
+
+
+def obtener_descuentos_frecuentes(conn: ServiceLayerConnection) -> Dict[str, float]:
+    """
+    Obtiene el descuento más frecuente (la moda) mayor a 0 para cada cliente
+    basado en su historial REAL de facturación desde 2024.
+    """
+    # Consulta masiva: agrupamos por Cliente y por Porcentaje de Descuento
+    sql = """
+        SELECT 
+            T0."CardCode",
+            T1."DiscPrcnt" AS "Descuento", 
+            COUNT(T1."DiscPrcnt") AS "Freq"
+        FROM "OINV" T0
+        INNER JOIN "INV1" T1 ON T0."DocEntry" = T1."DocEntry"
+        WHERE T1."DiscPrcnt" > 0 
+          AND T0."DocDate" >= '20240101'
+        GROUP BY T0."CardCode", T1."DiscPrcnt"
+    """
+    resultados = ejecutar_sql_sl(conn, sql)
+
+    temp_dict = {}
+    for r in resultados:
+        code = str(r.get("CardCode", ""))
+        disc = float(r.get("Descuento", 0))
+        freq = int(r.get("Freq", 0))
+
+        if code not in temp_dict:
+            temp_dict[code] = []
+        temp_dict[code].append((disc, freq))
+
+    descuentos_final = {}
+    for code, values in temp_dict.items():
+        # Ordenamos por frecuencia (mayor a menor) usando Python
+        values.sort(key=lambda x: (x[1], x[0]), reverse=True)
+        # Tomamos el descuento que más se ha usado (el primer elemento)
+        descuentos_final[code] = values[0][0]
+
+    return descuentos_final
 
 
 def obtener_vendedores(conn: ServiceLayerConnection) -> Dict[int, Dict]:
@@ -392,7 +436,9 @@ def obtener_documentos_cliente(
     return documentos
 
 
-def procesar_datos_cliente(conn: ServiceLayerConnection, cliente: Dict) -> List[Dict]:
+def procesar_datos_cliente(
+    conn: ServiceLayerConnection, cliente: Dict, descuentos_cache: Dict
+) -> List[Dict]:
     """
     Procesa un cliente y devuelve UNA LISTA de diccionarios,
     uno por cada vendedor que tenga facturas en este cliente.
@@ -403,7 +449,12 @@ def procesar_datos_cliente(conn: ServiceLayerConnection, cliente: Dict) -> List[
     condicion_pago, plazo_dias = obtener_condicion_pago(
         conn, cliente.get("PayTermsGrpCode")
     )
-    descuento_porcent = float(cliente.get("DiscountPercent", 0) or 0)
+
+    descuento_general = float(cliente.get("DiscountPercent", 0) or 0)
+    # Busca la "moda" del descuento. Si no tiene, usa el general
+    descuento_porcent = descuentos_cache.get(card_code, descuento_general)
+    # ---------------------------------------------------------
+
     grupo_descuento = cliente.get("GroupCode", -1)
 
     moneda_bp = cliente.get("Currency", "CRC")
@@ -511,7 +562,7 @@ def obtener_condicion_pago(conn: ServiceLayerConnection, pay_terms_code: int) ->
 # =============================================================================
 
 
-def ejecutar_reportes_gira():
+def ejecutar_reportes_gira(agente_id: str = None):
     print("=" * 80)
     print("🚗 PROCESO: Reportes de Gira para Agentes - Químicas Unidas")
     print(f"   Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
@@ -525,6 +576,9 @@ def ejecutar_reportes_gira():
     try:
         print("\n📋 Obteniendo listado de Agentes...")
         vendedores_cache = obtener_vendedores(conn)
+
+        print("📋 Obteniendo matriz de descuentos frecuentes...")
+        descuentos_cache = obtener_descuentos_frecuentes(conn)
 
         print("📋 Obteniendo clientes con saldo...")
         clientes = obtener_clientes_con_saldo(
@@ -545,7 +599,9 @@ def ejecutar_reportes_gira():
         with ThreadPoolExecutor(max_workers=4) as executor:
             # Lanzamos todas las peticiones a SAP en paralelo
             futuros = {
-                executor.submit(procesar_datos_cliente, conn, cli): cli
+                executor.submit(
+                    procesar_datos_cliente, conn, cli, descuentos_cache
+                ): cli
                 for cli in clientes
             }
 
@@ -594,6 +650,11 @@ def ejecutar_reportes_gira():
         resultados = {"procesados": 0, "enviados": 0, "errores": 0, "sin_correo": 0}
 
         for vendedor_id, clientes_del_agente in agrupados_por_agente.items():
+
+            # --- NUEVO FILTRO DE AGENTE ESPECÍFICO ---
+            if agente_id and str(vendedor_id) != str(agente_id):
+                continue
+
             info_vendedor = vendedores_cache.get(
                 vendedor_id, {"nombre": "No Asignado", "correo": ""}
             )
@@ -695,4 +756,22 @@ def ejecutar_reportes_gira():
 
 
 if __name__ == "__main__":
-    ejecutar_reportes_gira()
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        description="Automatización de Reportes de Gira - Químicas Unidas"
+    )
+    parser.add_argument(
+        "--agente",
+        type=str,
+        help="Ejecutar reporte solo para un agente específico. Ej: --agente 9",
+    )
+
+    # Mantenemos el soporte de --test por si lo estabas usando
+    if "--test" in sys.argv and not hasattr(parser.parse_args(), "test"):
+        pass  # Por si tienes lógica extra de --test en sys.argv
+
+    args, unknown = parser.parse_known_args()
+
+    ejecutar_reportes_gira(agente_id=args.agente)
