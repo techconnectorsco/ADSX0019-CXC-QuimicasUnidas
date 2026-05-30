@@ -59,14 +59,24 @@ def generar_qr_agente(datos_agente: Dict, totales_generales: Dict) -> str:
         "",
     ]
 
-    if totales_generales.get("dolares", 0) > 0:
-        lineas.append(
-            f"TOTAL A COBRAR (USD): {formato_latino(totales_generales['dolares'])}"
-        )
-    if totales_generales.get("colones", 0) > 0:
-        lineas.append(
-            f"TOTAL A COBRAR (CRC): {formato_latino(totales_generales['colones'])}"
-        )
+    tot_gen_usd = totales_generales.get("dolares", 0)
+    tot_gen_crc = totales_generales.get("colones", 0)
+
+    if tot_gen_usd != 0:
+        if tot_gen_usd < 0:
+            lineas.append(
+                f"TOTAL A COBRAR (USD): (USD - {formato_latino(abs(tot_gen_usd))})"
+            )
+        else:
+            lineas.append(f"TOTAL A COBRAR (USD): {formato_latino(tot_gen_usd)}")
+
+    if tot_gen_crc != 0:
+        if tot_gen_crc < 0:
+            lineas.append(
+                f"TOTAL A COBRAR (CRC): (CRC - {formato_latino(abs(tot_gen_crc))})"
+            )
+        else:
+            lineas.append(f"TOTAL A COBRAR (CRC): {formato_latino(tot_gen_crc)}")
 
     lineas.append("════════════════════════════════════════")
     lineas.append(f"Verificación: {codigo_verificacion}")
@@ -138,11 +148,26 @@ class PDFReporteGira(PDFBaseQU):
         nombre_str = f"{cliente.get('codigo', '')} - {cliente.get('nombre', '')}"
         self.cell(140, 6, nombre_str[:70], 0, 0)
 
-        deuda_str = "SALDO:"
-        if totales.get("dolares", 0) > 0:
-            deuda_str += f" USD {formato_latino(totales['dolares'])} |"
-        if totales.get("colones", 0) > 0:
-            deuda_str += f" CRC {formato_latino(totales['colones'])}"
+        # --- NUEVA LÓGICA DE SALDOS (Incluyendo negativos) ---
+        deuda_str = "SALDO: "
+        tot_usd = totales.get("dolares", 0)
+        tot_crc = totales.get("colones", 0)
+
+        if tot_usd != 0:
+            if tot_usd < 0:
+                deuda_str += f"(USD - {formato_latino(abs(tot_usd))}) | "
+            else:
+                deuda_str += f"USD {formato_latino(tot_usd)} | "
+
+        if tot_crc != 0:
+            if tot_crc < 0:
+                deuda_str += f"(CRC - {formato_latino(abs(tot_crc))})"
+            else:
+                deuda_str += f"CRC {formato_latino(tot_crc)}"
+
+        # Limpiar la barrita " | " final si quedó sobrando
+        deuda_str = deuda_str.strip(" | ")
+        # -----------------------------------------------------
 
         self.set_font("Arial", "B", 10)
         self.set_text_color(*ROJO)

@@ -25,6 +25,8 @@ from sendemailCXC import enviar_estado_cuenta
 from logcontrolcxc import ControlCXC
 from Generarexcel import generar_excel_estado_cuenta
 import uuid
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # =============================================================================
 # CONSTANTES
@@ -33,11 +35,14 @@ import uuid
 # Email para pruebas (comentar en producción)
 # EMAIL_PRUEBA = "credito@qu.cr"
 EMAIL_PRUEBA = "devs@techconnectors.co"
-MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al cliente real
+MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al cliente real
 
 # Email para enviar el log de control (en producción: encargada de CXC)
-# EMAIL_LOG_CONTROL = "credito@qu.cr"  # "devs@techconnectors.co"  # Cambiar en producción
-EMAIL_LOG_CONTROL = "devs@techconnectors.co"  # Cambiar en producción
+EMAIL_LOG_CONTROL = [
+    "credito@qu.cr",
+    "devs@techconnectors.co",
+]
+# EMAIL_LOG_CONTROL = "devs@techconnectors.co"  # Cambiar en producción
 
 # Tipos de documento que RESTAN al saldo (pagos, notas de crédito)
 TIPOS_QUE_RESTAN = {
@@ -301,7 +306,7 @@ def obtener_documentos_cliente(
             "$filter": f"({filtro_codigos}) and DocumentStatus eq 'bost_Open'",
             "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,DocumentLines",
         },
-        "DocDueDate",
+        "DocEntry",
     )
 
     for f in facturas:
@@ -309,16 +314,15 @@ def obtener_documentos_cliente(
         if doc:
             documentos.append(doc)
 
-    # 3. NOTAS DE CRÉDITO (CreditNotes) - FILTRADAS DESDE 2024 PARA EVITAR RECLAMOS VIEJOS
+    # 3. NOTAS DE CRÉDITO (CreditNotes) - FILTRADAS DESDE 2022 PARA EVITAR RECLAMOS VIEJOS
     notas_credito = obtener_todos_paginado(
         conn,
         "CreditNotes",
         {
-            # AÑADIDO: and DocDate ge '2024-01-01' para enterrar los casos 2018-2022 que mencionó Tania
-            "$filter": f"({filtro_codigos}) and DocumentStatus eq 'bost_Open' and DocDate ge '2024-01-01'",
+            "$filter": f"({filtro_codigos}) and DocumentStatus eq 'bost_Open' and DocDate ge '2022-01-01'",
             "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,DocumentLines",
         },
-        "DocDueDate",
+        "DocEntry",
     )
 
     for nc in notas_credito:
@@ -332,7 +336,7 @@ def obtener_documentos_cliente(
     lista_in = ", ".join([f"'{c}'" for c in codigos_familia])
 
     # CONTROLES CRÍTICOS AÑADIDOS:
-    # - Filtro de fecha cambiado a >= '20240101'
+    # - Filtro de fecha cambiado a >= '20220101'
     # - TransType NOT IN ('13', '14') para que no jale los asientos de Facturas ni NCs (Cero Duplicados)
     sql_pr = f"""
         SELECT 
@@ -346,8 +350,8 @@ def obtener_documentos_cliente(
         FROM "JDT1" T0 
         WHERE T0."ShortName" IN ({lista_in}) 
           AND T0."BalDueCred" > 0 
-          AND T0."RefDate" >= '20240101'
-          AND T0."TransType" NOT IN ('13', '14')
+          AND T0."RefDate" >= '20220101'
+          AND T0."TransType" NOT IN ('13', '14', '30')
     """
 
     filas_pr = ejecutar_sql_sl(conn, sql_pr)
@@ -420,10 +424,10 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
         return None
 
     # Tipo de documento
-    tipo_doc = doc.get("U_TDOC", "") or ""
+    tipo_doc = str(doc.get("U_TDOC", "") or "").strip().upper()
 
-    # Para notas de crédito, el saldo es negativo
-    if tipo_origen == "creditnote" or tipo_doc.upper() in TIPOS_QUE_RESTAN:
+    # Para notas de crédito O documentos de la lista, el saldo DEBE ser negativo
+    if tipo_origen == "creditnote" or tipo_doc in TIPOS_QUE_RESTAN or tipo_doc == "PR":
         saldo = -abs(saldo)
         total = -abs(total)
 
@@ -777,7 +781,7 @@ def ejecutar_proceso_cxc(
             print("   No hay clientes con saldo pendiente")
             return
 
-        # 2. Procesar cada cliente
+        # 2. Procesar cada cliente (VERSIÓN MULTIHILO - MAX 4)
         resultados = {
             "procesados": 0,
             "enviados": 0,
@@ -786,144 +790,131 @@ def ejecutar_proceso_cxc(
         }
 
         sp_uploader = SharePointUploader()
+        lock = threading.Lock()  # Candado para evitar choques al escribir en el log
 
-        for i, cliente in enumerate(clientes, 1):
+        def procesar_un_cliente(i, cliente):
             card_code = cliente.get("CardCode")
             card_name = cliente.get("CardName")
 
-            print(f"\n[{i}/{len(clientes)}] {card_code} - {card_name}")
+            print(f" ⚡ [Hilo] Iniciando [{i}/{len(clientes)}] {card_code}")
 
             # Verificar si permite envío automático
-            # BYPASS: Si pasamos un cliente por consola/API (lista_clientes), ignoramos el bloqueo de SAP.
             if not cliente_permite_envio(cliente) and not lista_clientes:
-                print(f"   ⏭️ Envío automático deshabilitado")
-                log_control.agregar_registro(
-                    codigo=card_code,
-                    nombre=card_name,
-                    correos=[],
-                    docs_usd=0,
-                    docs_crc=0,
-                    total_usd=0,
-                    total_crc=0,
-                    vencido_usd=0,
-                    vencido_crc=0,
-                    pdf_generado=False,
-                    email_status="deshabilitado",
-                    observacion="Envío automático deshabilitado",
-                )
-                continue
+                print(f"   ⏭️ [{card_code}] Envío deshabilitado")
+                with lock:
+                    log_control.agregar_registro(
+                        codigo=card_code,
+                        nombre=card_name,
+                        correos=[],
+                        docs_usd=0,
+                        docs_crc=0,
+                        total_usd=0,
+                        total_crc=0,
+                        vencido_usd=0,
+                        vencido_crc=0,
+                        pdf_generado=False,
+                        email_status="deshabilitado",
+                        observacion="Envío automático deshabilitado",
+                    )
+                return
 
             # Preparar datos del cliente
-            datos = preparar_datos_cliente(conn, cliente)
+            try:
+                datos = preparar_datos_cliente(conn, cliente)
+            except Exception as e:
+                print(f"   ❌ [{card_code}] Error al obtener datos: {e}")
+                with lock:
+                    resultados["errores"] += 1
+                return
 
-            # Verificar si tiene documentos
+            # Verificar si tiene documentos pendientes
             total_docs = len(datos["documentos"]["colones"]) + len(
                 datos["documentos"]["dolares"]
             )
             if total_docs == 0:
-                print(f"   ⏭️ Sin documentos pendientes")
-                log_control.agregar_registro(
-                    codigo=card_code,
-                    nombre=card_name,
-                    correos=datos["cliente"]["correos"],
-                    docs_usd=0,
-                    docs_crc=0,
-                    total_usd=0,
-                    total_crc=0,
-                    vencido_usd=0,
-                    vencido_crc=0,
-                    pdf_generado=False,
-                    email_status="pendiente",
-                    observacion="Sin documentos pendientes",
-                )
-                continue
+                print(f"   ⏭️ [{card_code}] Sin documentos pendientes")
+                with lock:
+                    log_control.agregar_registro(
+                        codigo=card_code,
+                        nombre=card_name,
+                        correos=datos["cliente"]["correos"],
+                        docs_usd=0,
+                        docs_crc=0,
+                        total_usd=0,
+                        total_crc=0,
+                        vencido_usd=0,
+                        vencido_crc=0,
+                        pdf_generado=False,
+                        email_status="pendiente",
+                        observacion="Sin documentos pendientes",
+                    )
+                return
 
-            resultados["procesados"] += 1
+            with lock:
+                resultados["procesados"] += 1
 
             # Verificar correos
             correos = datos["cliente"]["correos"]
             if not correos:
-                print(f"   ⚠️ Sin correo electrónico")
-                resultados["sin_correo"] += 1
-                log_control.agregar_registro(
-                    codigo=card_code,
-                    nombre=card_name,
-                    correos=[],
-                    docs_usd=len(datos["documentos"]["dolares"]),
-                    docs_crc=len(datos["documentos"]["colones"]),
-                    total_usd=datos["totales"]["dolares"],
-                    total_crc=datos["totales"]["colones"],
-                    vencido_usd=datos["rangos_vencimiento"]["USD"]["total_vencido"],
-                    vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
-                    pdf_generado=False,
-                    email_status="sin_correo",
-                    observacion="Cliente sin correo configurado",
-                )
-                continue
+                print(f"   ⚠️ [{card_code}] Sin correo electrónico")
+                with lock:
+                    resultados["sin_correo"] += 1
+                    log_control.agregar_registro(
+                        codigo=card_code,
+                        nombre=card_name,
+                        correos=[],
+                        docs_usd=len(datos["documentos"]["dolares"]),
+                        docs_crc=len(datos["documentos"]["colones"]),
+                        total_usd=datos["totales"]["dolares"],
+                        total_crc=datos["totales"]["colones"],
+                        vencido_usd=datos["rangos_vencimiento"]["USD"]["total_vencido"],
+                        vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
+                        pdf_generado=False,
+                        email_status="sin_correo",
+                        observacion="Cliente sin correo configurado",
+                    )
+                return
 
-            # Mostrar resumen
-            print(f"   Documentos: {total_docs}")
-            if datos["totales"]["dolares"] != 0:
-                print(f"   Total USD: ${datos['totales']['dolares']:,.2f}")
-            if datos["totales"]["colones"] != 0:
-                print(f"   Total CRC: ₡{datos['totales']['colones']:,.2f}")
-            print(f"   Correo(s): {', '.join(correos)}")
-
-            # Generar PDF
+            # Generar PDF y Excel
             pdf_generado = False
             excel_path = None
 
             try:
                 pdf_path = generar_pdf_estado_cuenta(datos)
-                print(f"   ✅ PDF generado: {pdf_path}")
+                print(f"   ✅ [{card_code}] PDF generado")
                 pdf_generado = True
-
-                # ☁️ Subir a SharePoint en la carpeta de CXC
                 sp_uploader.upload_reporte(pdf_path, "CXC_Clientes")
-
-                # Generar Excel (mismo datos)
 
                 try:
                     excel_path = generar_excel_estado_cuenta(datos)
-                    print(f"   ✅ Excel generado: {excel_path}")
                     sp_uploader.upload_reporte(excel_path, "CXC_Clientes")
                 except Exception as e:
-                    print(f"   ⚠️ Error generando Excel: {str(e)}")
-                    # No es crítico, continúa con el PDF
+                    print(f"   ⚠️ [{card_code}] Error Excel: {e}")
             except Exception as e:
-                print(f"   ❌ Error generando PDF: {str(e)}")
-                resultados["errores"] += 1
-                log_control.agregar_registro(
-                    codigo=card_code,
-                    nombre=card_name,
-                    correos=correos,
-                    docs_usd=len(datos["documentos"]["dolares"]),
-                    docs_crc=len(datos["documentos"]["colones"]),
-                    total_usd=datos["totales"]["dolares"],
-                    total_crc=datos["totales"]["colones"],
-                    vencido_usd=datos["rangos_vencimiento"]["USD"]["total_vencido"],
-                    vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
-                    pdf_generado=False,
-                    email_status="error",
-                    observacion=f"Error PDF: {str(e)[:30]}",
-                )
-                continue
+                print(f"   ❌ [{card_code}] Error PDF: {e}")
+                with lock:
+                    resultados["errores"] += 1
+                    log_control.agregar_registro(
+                        codigo=card_code,
+                        nombre=card_name,
+                        correos=correos,
+                        docs_usd=len(datos["documentos"]["dolares"]),
+                        docs_crc=len(datos["documentos"]["colones"]),
+                        total_usd=datos["totales"]["dolares"],
+                        total_crc=datos["totales"]["colones"],
+                        vencido_usd=datos["rangos_vencimiento"]["USD"]["total_vencido"],
+                        vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
+                        pdf_generado=False,
+                        email_status="error",
+                        observacion=f"Error PDF: {str(e)[:30]}",
+                    )
+                return
 
             # Enviar correo
-            # En modo prueba, envía a EMAIL_PRUEBA
-            # En producción, envía a los correos reales del cliente
-            if MODO_PRUEBA:
-                destinatarios = [EMAIL_PRUEBA]
-                print(
-                    f"   📧 MODO PRUEBA: Enviando a {EMAIL_PRUEBA} (en vez de {', '.join(correos)})"
-                )
-            else:
-                destinatarios = correos
+            destinatarios = [EMAIL_PRUEBA] if MODO_PRUEBA else correos
 
             try:
-                # Obtener el plazo dinámico (PayTermsGrpCode se convierte en días)
                 plazo_dias = datos["cliente"]["plazo_dias"]
-
                 enviado = enviar_estado_cuenta(
                     destinatarios=destinatarios,
                     nombre_cliente=datos["cliente"]["nombre"],
@@ -933,8 +924,17 @@ def ejecutar_proceso_cxc(
                     plazo_dias=plazo_dias,
                     ruta_excel=excel_path,
                 )
-                if enviado:
-                    resultados["enviados"] += 1
+
+                with lock:
+                    if enviado:
+                        resultados["enviados"] += 1
+                        estado_txt = "enviado"
+                        obs_txt = "PDF + Excel enviados OK"
+                    else:
+                        resultados["errores"] += 1
+                        estado_txt = "error"
+                        obs_txt = "Error al enviar correo"
+
                     log_control.agregar_registro(
                         codigo=card_code,
                         nombre=card_name,
@@ -946,10 +946,12 @@ def ejecutar_proceso_cxc(
                         vencido_usd=datos["rangos_vencimiento"]["USD"]["total_vencido"],
                         vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
                         pdf_generado=pdf_generado,
-                        email_status="enviado",
-                        observacion="PDF + Excel enviados OK",
+                        email_status=estado_txt,
+                        observacion=obs_txt,
                     )
-                else:
+            except Exception as e:
+                print(f"   ❌ [{card_code}] Error correo: {e}")
+                with lock:
                     resultados["errores"] += 1
                     log_control.agregar_registro(
                         codigo=card_code,
@@ -963,25 +965,22 @@ def ejecutar_proceso_cxc(
                         vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
                         pdf_generado=pdf_generado,
                         email_status="error",
-                        observacion="Error al enviar correo",
+                        observacion=f"Excepción: {str(e)[:25]}",
                     )
-            except Exception as e:
-                print(f"   ❌ Error enviando correo: {str(e)}")
-                resultados["errores"] += 1
-                log_control.agregar_registro(
-                    codigo=card_code,
-                    nombre=card_name,
-                    correos=correos,
-                    docs_usd=len(datos["documentos"]["dolares"]),
-                    docs_crc=len(datos["documentos"]["colones"]),
-                    total_usd=datos["totales"]["dolares"],
-                    total_crc=datos["totales"]["colones"],
-                    vencido_usd=datos["rangos_vencimiento"]["USD"]["total_vencido"],
-                    vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
-                    pdf_generado=pdf_generado,
-                    email_status="error",
-                    observacion=f"Excepción: {str(e)[:25]}",
-                )
+
+        # 🚀 LANZADOR DE HILOS (PUNTO DULCE: 4 WORKERS)
+        print("\n🚀 Iniciando procesamiento concurrente (4 Hilos)...")
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futuros = []
+            for i, cliente in enumerate(clientes, 1):
+                futuros.append(executor.submit(procesar_un_cliente, i, cliente))
+
+            # Esperar a que terminen todos sin colgarse
+            for futuro in as_completed(futuros):
+                try:
+                    futuro.result()
+                except Exception as e:
+                    print(f" 💥 Error crítico en un hilo: {e}")
 
         # 3. Resumen final
         print("\n" + "=" * 80)
@@ -1002,12 +1001,13 @@ def ejecutar_proceso_cxc(
             sp_uploader.upload_reporte(log_path, "Logs_de_CXC")
 
             # Enviar log por correo
-            print(f"   Enviando log a {EMAIL_LOG_CONTROL}...")
+            correos_log_str = ", ".join(EMAIL_LOG_CONTROL)
+            print(f"   Enviando log a {correos_log_str}...")
             from sendemailCXC import EmailSenderCXC
 
             sender = EmailSenderCXC()
             enviado_log = sender.enviar_control_interno(
-                destinatarios=[EMAIL_LOG_CONTROL],
+                destinatarios=EMAIL_LOG_CONTROL,  # <--- SE LE QUITAN LOS CORCHETES [ ] AQUÍ
                 archivos=[log_path],
                 stats=log_control.stats,
             )

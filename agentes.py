@@ -127,8 +127,8 @@ def obtener_clientes_con_saldo(
 
 def obtener_descuentos_frecuentes(conn: ServiceLayerConnection) -> Dict[str, float]:
     """
-    Obtiene el descuento más frecuente (la moda) mayor a 0 para cada cliente
-    basado en su historial REAL de facturación desde 2024.
+    Obtiene el descuento más frecuente mayor a 0 para cada cliente
+    basado en su historial REAL de facturación desde 2022.
     """
     # Consulta masiva: agrupamos por Cliente y por Porcentaje de Descuento
     sql = """
@@ -139,7 +139,7 @@ def obtener_descuentos_frecuentes(conn: ServiceLayerConnection) -> Dict[str, flo
         FROM "OINV" T0
         INNER JOIN "INV1" T1 ON T0."DocEntry" = T1."DocEntry"
         WHERE T1."DiscPrcnt" > 0 
-          AND T0."DocDate" >= '20240101'
+          AND T0."DocDate" >= '20220101'
         GROUP BY T0."CardCode", T1."DiscPrcnt"
     """
     resultados = ejecutar_sql_sl(conn, sql)
@@ -254,8 +254,10 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
     if abs(saldo) < 0.01:
         return None
 
-    tipo_doc = doc.get("U_TDOC", "") or ""
-    if tipo_origen == "creditnote" or tipo_doc.upper() in TIPOS_QUE_RESTAN:
+    tipo_doc = str(doc.get("U_TDOC", "") or "").strip().upper()
+
+    # Para notas de crédito O documentos de la lista, el saldo DEBE ser negativo
+    if tipo_origen == "creditnote" or tipo_doc in TIPOS_QUE_RESTAN or tipo_doc == "PR":
         saldo = -abs(saldo)
         total = -abs(total)
 
@@ -349,7 +351,7 @@ def obtener_documentos_cliente(
             "$filter": f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open'",
             "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,ShipToCode,DocumentLines",
         },
-        "DocDueDate",
+        "DocEntry",
     )
     for f in facturas:
         doc = procesar_documento(f, "invoice")
@@ -358,16 +360,16 @@ def obtener_documentos_cliente(
             doc["vendedor_final"] = mapeo_dir.get(destino, vendedor_general)
             documentos.append(doc)
 
-    # 2. NOTAS DE CRÉDITO (CreditNotes) - AHORA CON FILTRO DESDE EL 2024
+    # 2. NOTAS DE CRÉDITO (CreditNotes) - AHORA CON FILTRO DESDE EL 2022
     notas_credito = obtener_todos_paginado(
         conn,
         "CreditNotes",
         {
-            # AÑADIDO: DocDate ge '2024-01-01' para evitar la basura vieja del 2019
-            "$filter": f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open' and DocDate ge '2024-01-01'",
+            # AÑADIDO: DocDate ge '2022-01-01' para evitar la basura vieja del 2019
+            "$filter": f"CardCode eq '{card_code}' and DocumentStatus eq 'bost_Open' and DocDate ge '2022-01-01'",
             "$select": "DocNum,DocEntry,DocDate,DocDueDate,DocTotal,DocTotalFc,PaidToDate,PaidToDateFC,DocCurrency,U_TDOC,U_NVT_ConsecutivoFE,U_NUM_CONSE,NumAtCard,Comments,ShipToCode,DocumentLines",
         },
-        "DocDueDate",
+        "DocEntry",
     )
     for nc in notas_credito:
         doc = procesar_documento(nc, "creditnote")
@@ -390,8 +392,8 @@ def obtener_documentos_cliente(
         FROM "JDT1" T0 
         WHERE T0."ShortName" = '{card_code}' 
           AND T0."BalDueCred" > 0 
-          AND T0."RefDate" >= '20240101'
-          AND T0."TransType" NOT IN ('13', '14')
+          AND T0."RefDate" >= '20220101'
+          AND T0."TransType" NOT IN ('13', '14', '30')
     """
 
     filas_pr = ejecutar_sql_sl(conn, sql_pr)

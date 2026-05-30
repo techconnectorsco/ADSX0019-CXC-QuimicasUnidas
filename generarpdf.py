@@ -170,7 +170,8 @@ class PDFEstadoCuenta(PDFBaseQU):
         self.cell(30, 5, "Límite Crédito:", 0, 0)
         self.set_font("Arial", "", 10)
         limite = cliente.get("limite_credito", 0)
-        self.cell(0, 5, f"CRC {formato_latino(limite)}", 0, 1)
+        moneda_lim = cliente.get("moneda_limite", "CRC")  # Trae la moneda real
+        self.cell(0, 5, f"{moneda_lim} {formato_latino(limite)}", 0, 1)
 
         self.set_x(15)
         self.set_font("Arial", "B", 10)
@@ -270,28 +271,26 @@ class PDFEstadoCuenta(PDFBaseQU):
         self.set_text_color(255, 255, 255)
 
         if docs_usd:
+            tot_usd = totales["dolares"]
+            # El menos justo antes del número
+            if tot_usd < 0:
+                str_usd = f"(USD - {formato_latino(abs(tot_usd))})"
+            else:
+                str_usd = f"USD {formato_latino(tot_usd)}"
+
             self.cell(ancho_blanco, 6, "TOTAL GENERAL USD:", 1, 0, "R", True)
-            self.cell(
-                anchos[-2] + anchos[-1],
-                6,
-                f"USD {formato_latino(totales['dolares'])}",
-                1,
-                1,
-                "R",
-                True,
-            )
+            self.cell(anchos[-2] + anchos[-1], 6, str_usd, 1, 1, "R", True)
 
         if docs_crc:
+            tot_crc = totales["colones"]
+            # El menos justo antes del número
+            if tot_crc < 0:
+                str_crc = f"(CRC - {formato_latino(abs(tot_crc))})"
+            else:
+                str_crc = f"CRC {formato_latino(tot_crc)}"
+
             self.cell(ancho_blanco, 6, "TOTAL GENERAL COLONES:", 1, 0, "R", True)
-            self.cell(
-                anchos[-2] + anchos[-1],
-                6,
-                f"CRC {formato_latino(totales['colones'])}",
-                1,
-                1,
-                "R",
-                True,
-            )
+            self.cell(anchos[-2] + anchos[-1], 6, str_crc, 1, 1, "R", True)
 
         self.set_text_color(0, 0, 0)
         self.ln(5)
