@@ -911,62 +911,76 @@ def ejecutar_proceso_cxc(
                 return
 
             # Enviar correo
-            destinatarios = [EMAIL_PRUEBA] if MODO_PRUEBA else correos
-
-            try:
-                plazo_dias = datos["cliente"]["plazo_dias"]
-                enviado = enviar_estado_cuenta(
-                    destinatarios=destinatarios,
-                    nombre_cliente=datos["cliente"]["nombre"],
-                    codigo_cliente=datos["cliente"]["codigo"],
-                    ruta_pdf=pdf_path,
-                    datos=datos,
-                    plazo_dias=plazo_dias,
-                    ruta_excel=excel_path,
+            if MODO_PRUEBA:
+                destinatarios = [EMAIL_PRUEBA]
+                print(
+                    f"   📧 [{card_code}] MODO PRUEBA: Direccionando a {EMAIL_PRUEBA}"
+                )
+            else:
+                destinatarios = correos
+                print(
+                    f"   📧 [{card_code}] Enviando a cliente: {', '.join(destinatarios)}"
                 )
 
-                with lock:
-                    if enviado:
-                        resultados["enviados"] += 1
-                        estado_txt = "enviado"
-                        obs_txt = "PDF + Excel enviados OK"
-                    else:
-                        resultados["errores"] += 1
-                        estado_txt = "error"
-                        obs_txt = "Error al enviar correo"
+            # 2. Lógica de envío con reintentos (Soporta microcaídas)
+            intentos_max = 3
+            enviado = False
 
-                    log_control.agregar_registro(
-                        codigo=card_code,
-                        nombre=card_name,
-                        correos=correos,
-                        docs_usd=len(datos["documentos"]["dolares"]),
-                        docs_crc=len(datos["documentos"]["colones"]),
-                        total_usd=datos["totales"]["dolares"],
-                        total_crc=datos["totales"]["colones"],
-                        vencido_usd=datos["rangos_vencimiento"]["USD"]["total_vencido"],
-                        vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
-                        pdf_generado=pdf_generado,
-                        email_status=estado_txt,
-                        observacion=obs_txt,
+            for intento in range(1, intentos_max + 1):
+                try:
+                    plazo_dias = datos["cliente"]["plazo_dias"]
+                    enviado = enviar_estado_cuenta(
+                        destinatarios=destinatarios,
+                        nombre_cliente=datos["cliente"]["nombre"],
+                        codigo_cliente=datos["cliente"]["codigo"],
+                        ruta_pdf=pdf_path,
+                        datos=datos,
+                        plazo_dias=plazo_dias,
+                        ruta_excel=excel_path,
                     )
-            except Exception as e:
-                print(f"   ❌ [{card_code}] Error correo: {e}")
-                with lock:
+
+                    if enviado:
+                        print(f"   ✅ [{card_code}] CORREO ENVIADO (Intento {intento})")
+                        break
+                    else:
+                        print(
+                            f"   ⚠️ [{card_code}] Fallo intento {intento}/{intentos_max}..."
+                        )
+
+                except Exception as e:
+                    print(f"   ⚠️ [{card_code}] Excepción en intento {intento}: {e}")
+
+                if not enviado and intento < intentos_max:
+                    import time
+
+                    time.sleep(2)  # Pausa de seguridad para estabilizar la red
+
+            # 3. Registro final en el log (Protegido con Lock)
+            with lock:
+                if enviado:
+                    resultados["enviados"] += 1
+                    estado_txt = "enviado"
+                    obs_txt = "PDF + Excel enviados OK"
+                else:
+                    print(f"   ❌ [{card_code}] AGOTADOS LOS {intentos_max} INTENTOS")
                     resultados["errores"] += 1
-                    log_control.agregar_registro(
-                        codigo=card_code,
-                        nombre=card_name,
-                        correos=correos,
-                        docs_usd=len(datos["documentos"]["dolares"]),
-                        docs_crc=len(datos["documentos"]["colones"]),
-                        total_usd=datos["totales"]["dolares"],
-                        total_crc=datos["totales"]["colones"],
-                        vencido_usd=datos["rangos_vencimiento"]["USD"]["total_vencido"],
-                        vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
-                        pdf_generado=pdf_generado,
-                        email_status="error",
-                        observacion=f"Excepción: {str(e)[:25]}",
-                    )
+                    estado_txt = "error"
+                    obs_txt = f"Fallaron {intentos_max} intentos de envío"
+
+                log_control.agregar_registro(
+                    codigo=card_code,
+                    nombre=card_name,
+                    correos=correos,
+                    docs_usd=len(datos["documentos"]["dolares"]),
+                    docs_crc=len(datos["documentos"]["colones"]),
+                    total_usd=datos["totales"]["dolares"],
+                    total_crc=datos["totales"]["colones"],
+                    vencido_usd=datos["rangos_vencimiento"]["USD"]["total_vencido"],
+                    vencido_crc=datos["rangos_vencimiento"]["CRC"]["total_vencido"],
+                    pdf_generado=pdf_generado,
+                    email_status=estado_txt,
+                    observacion=obs_txt,
+                )
 
         # 🚀 LANZADOR DE HILOS (PUNTO DULCE: 4 WORKERS)
         print("\n🚀 Iniciando procesamiento concurrente (4 Hilos)...")
