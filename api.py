@@ -22,12 +22,15 @@ app = FastAPI(title="API RPA CXC - Sistema de Colas Local")
 cola_tareas = queue.Queue()
 
 
-# Agregamos 'correo_prueba' como opcional
+# Actualizado para que coincida exactamente con el payload de SvelteKit
 class PeticionCXC(BaseModel):
     clientes: List[str] = []
     solo_prueba: bool = False
     ejecutar_todos: bool = False
-    correo_prueba: Optional[str] = None  # <-- NUEVO CAMPO
+    correo_destino: Optional[str] = (
+        None  # Correo al que llegarán los PDFs en modo prueba
+    )
+    correo_logs: Optional[str] = None  # Correo al que llegará el Log de Control
 
 
 # ==========================================
@@ -39,40 +42,44 @@ def procesador_cola():
         job_id = tarea["job_id"]
         clientes = tarea["clientes"]
         solo_prueba = tarea["solo_prueba"]
-        correo_prueba = tarea["correo_prueba"]
+        correo_destino = tarea["correo_destino"]
+        correo_logs = tarea["correo_logs"]
 
         print(f"\n[{job_id}] 🔄 Iniciando trabajo encolado...")
 
         try:
-            # Configurar variables de prueba/producción
-            if solo_prueba:
-                main.MODO_PRUEBA = True
-
-                # Usar el correo dinámico de la web, o un fallback de seguridad si lo envían vacío
-                correo_destino = (
-                    correo_prueba if correo_prueba else "devs@techconnectors.co"
-                )  # "credito@qu.cr"
-
-                main.EMAIL_PRUEBA = correo_destino
-                main.EMAIL_LOG_CONTROL = [correo_destino]
-
-                print(
-                    f"[{job_id}] ⚙️ MODO PRUEBA: PDFs y Log enviados a {correo_destino}"
-                )
+            # 1. Configurar destino del Log de Control
+            if correo_logs:
+                main.EMAIL_LOG_CONTROL = [correo_logs]
+                print(f"[{job_id}] ⚙️ LOGS: Redirigidos a {correo_logs}")
             else:
-                main.MODO_PRUEBA = False
-
-                # Restauramos la lista original para envíos reales
                 main.EMAIL_LOG_CONTROL = [
                     "credito@qu.cr",
                     "devs@techconnectors.co",
                     "creditodenis@qu.cr",
                     "asistente1@powermotorsca.com",
                 ]
+                print(f"[{job_id}] ⚙️ LOGS: Enviados al equipo completo por defecto")
+
+            # 2. Configurar modo Prueba vs Real (Destino de los PDFs)
+            if solo_prueba:
+                main.MODO_PRUEBA = True
+                # Usar el correo dinámico de la web, o un fallback de seguridad
+                correo_prueba_final = (
+                    correo_destino if correo_destino else "devs@techconnectors.co"
+                )
+                main.EMAIL_PRUEBA = correo_prueba_final
+
                 print(
-                    f"[{job_id}] ⚙️ MODO REAL: Correos a clientes y Log a todo el equipo"
+                    f"[{job_id}] ⚙️ MODO PRUEBA: PDFs enviados a {correo_prueba_final}"
+                )
+            else:
+                main.MODO_PRUEBA = False
+                print(
+                    f"[{job_id}] ⚙️ MODO REAL: Correos enviados directamente a los clientes"
                 )
 
+            # 3. Alcance de ejecución
             if clientes is None:
                 print(
                     f"[{job_id}] 🌍 ALCANCE: Ejecutando para TODOS los clientes con saldo"
@@ -82,7 +89,7 @@ def procesador_cola():
                     f"[{job_id}] 🎯 ALCANCE: Ejecutando para {len(clientes)} clientes específicos"
                 )
 
-            # Ejecutar el proceso principal
+            # 4. Ejecutar el proceso principal
             main.ejecutar_proceso_cxc(lista_clientes=clientes)
 
             print(f"[{job_id}] ✅ Trabajo finalizado con éxito.")
@@ -99,7 +106,7 @@ threading.Thread(target=procesador_cola, daemon=True).start()
 
 
 # ==========================================
-# ENDPOINT DE LA API
+# ENDPOINTS DE LA API
 # ==========================================
 @app.post("/api/ejecutar-cxc")
 def encolar_rpa(peticion: PeticionCXC):
@@ -109,11 +116,11 @@ def encolar_rpa(peticion: PeticionCXC):
             "mensaje": "Debe seleccionar clientes o activar la opción 'ejecutar_todos'",
         }
 
-    # Validación adicional: si es modo prueba, exigir el correo
-    if peticion.solo_prueba and not peticion.correo_prueba:
+    # Validación adicional: si es modo prueba, exigir el correo destino
+    if peticion.solo_prueba and not peticion.correo_destino:
         return {
             "estado": "error",
-            "mensaje": "Debe proporcionar un 'correo_prueba' al activar el modo de prueba",
+            "mensaje": "Debe proporcionar un 'correo_destino' al activar el modo de revisión",
         }
 
     job_id = str(uuid.uuid4())[:8]
@@ -125,14 +132,13 @@ def encolar_rpa(peticion: PeticionCXC):
             "job_id": job_id,
             "clientes": clientes_a_procesar,
             "solo_prueba": peticion.solo_prueba,
-            "correo_prueba": peticion.correo_prueba,  # <-- PASARLO A LA COLA
+            "correo_destino": peticion.correo_destino,
+            "correo_logs": peticion.correo_logs,
         }
     )
 
-    destino = (
-        f"Modo Prueba ({peticion.correo_prueba})"
-        if peticion.solo_prueba
-        else "Modo Real (Clientes)"
+    destino_pdf = (
+        f"Revisión ({peticion.correo_destino})" if peticion.solo_prueba else "Clientes"
     )
     alcance = (
         "TODOS los clientes"
@@ -142,7 +148,7 @@ def encolar_rpa(peticion: PeticionCXC):
 
     return {
         "estado": "exito",
-        "mensaje": f"Encolado correctamente para {alcance}. Destino: {destino}.",
+        "mensaje": f"Encolado correctamente para {alcance}. PDFs a: {destino_pdf}.",
         "job_id": job_id,
     }
 
@@ -155,7 +161,6 @@ def listar_clientes():
         return {"estado": "error", "mensaje": "No se pudo conectar a SAP SL"}
 
     try:
-        # Esto jalará todos los clientes usando la paginación que ya tenías programada
         clientes = obtener_clientes_con_saldo(conn)
         return {"estado": "exito", "total": len(clientes), "clientes": clientes}
     except Exception as e:
