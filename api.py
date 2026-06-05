@@ -1,0 +1,166 @@
+import sys
+import os
+import threading
+import queue
+import uuid
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List, Optional
+import uvicorn
+from modules.database.conexion import ServiceLayerConnection
+from main import obtener_clientes_con_saldo
+
+# Asegurar que el script encuentre main.py
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import main
+
+# ==========================================
+# INICIALIZACIÓN
+# ==========================================
+app = FastAPI(title="API RPA CXC - Sistema de Colas Local")
+
+cola_tareas = queue.Queue()
+
+
+# Agregamos 'correo_prueba' como opcional
+class PeticionCXC(BaseModel):
+    clientes: List[str] = []
+    solo_prueba: bool = False
+    ejecutar_todos: bool = False
+    correo_prueba: Optional[str] = None  # <-- NUEVO CAMPO
+
+
+# ==========================================
+# HILO TRABAJADOR (WORKER)
+# ==========================================
+def procesador_cola():
+    while True:
+        tarea = cola_tareas.get()
+        job_id = tarea["job_id"]
+        clientes = tarea["clientes"]
+        solo_prueba = tarea["solo_prueba"]
+        correo_prueba = tarea["correo_prueba"]
+
+        print(f"\n[{job_id}] 🔄 Iniciando trabajo encolado...")
+
+        try:
+            # Configurar variables de prueba/producción
+            if solo_prueba:
+                main.MODO_PRUEBA = True
+
+                # Usar el correo dinámico de la web, o un fallback de seguridad si lo envían vacío
+                correo_destino = (
+                    correo_prueba if correo_prueba else "devs@techconnectors.co"
+                )  # "credito@qu.cr"
+
+                main.EMAIL_PRUEBA = correo_destino
+                main.EMAIL_LOG_CONTROL = [correo_destino]
+
+                print(
+                    f"[{job_id}] ⚙️ MODO PRUEBA: PDFs y Log enviados a {correo_destino}"
+                )
+            else:
+                main.MODO_PRUEBA = False
+
+                # Restauramos la lista original para envíos reales
+                main.EMAIL_LOG_CONTROL = [
+                    "credito@qu.cr",
+                    "devs@techconnectors.co",
+                    "creditodenis@qu.cr",
+                    "asistente1@powermotorsca.com",
+                ]
+                print(
+                    f"[{job_id}] ⚙️ MODO REAL: Correos a clientes y Log a todo el equipo"
+                )
+
+            if clientes is None:
+                print(
+                    f"[{job_id}] 🌍 ALCANCE: Ejecutando para TODOS los clientes con saldo"
+                )
+            else:
+                print(
+                    f"[{job_id}] 🎯 ALCANCE: Ejecutando para {len(clientes)} clientes específicos"
+                )
+
+            # Ejecutar el proceso principal
+            main.ejecutar_proceso_cxc(lista_clientes=clientes)
+
+            print(f"[{job_id}] ✅ Trabajo finalizado con éxito.")
+
+        except Exception as e:
+            print(f"[{job_id}] ❌ Error en el proceso: {str(e)}")
+
+        finally:
+            cola_tareas.task_done()
+
+
+# Arrancar el trabajador al iniciar la API
+threading.Thread(target=procesador_cola, daemon=True).start()
+
+
+# ==========================================
+# ENDPOINT DE LA API
+# ==========================================
+@app.post("/api/ejecutar-cxc")
+def encolar_rpa(peticion: PeticionCXC):
+    if not peticion.ejecutar_todos and not peticion.clientes:
+        return {
+            "estado": "error",
+            "mensaje": "Debe seleccionar clientes o activar la opción 'ejecutar_todos'",
+        }
+
+    # Validación adicional: si es modo prueba, exigir el correo
+    if peticion.solo_prueba and not peticion.correo_prueba:
+        return {
+            "estado": "error",
+            "mensaje": "Debe proporcionar un 'correo_prueba' al activar el modo de prueba",
+        }
+
+    job_id = str(uuid.uuid4())[:8]
+    clientes_a_procesar = None if peticion.ejecutar_todos else peticion.clientes
+
+    # Mandar a la cola local
+    cola_tareas.put(
+        {
+            "job_id": job_id,
+            "clientes": clientes_a_procesar,
+            "solo_prueba": peticion.solo_prueba,
+            "correo_prueba": peticion.correo_prueba,  # <-- PASARLO A LA COLA
+        }
+    )
+
+    destino = (
+        f"Modo Prueba ({peticion.correo_prueba})"
+        if peticion.solo_prueba
+        else "Modo Real (Clientes)"
+    )
+    alcance = (
+        "TODOS los clientes"
+        if peticion.ejecutar_todos
+        else f"{len(peticion.clientes)} clientes"
+    )
+
+    return {
+        "estado": "exito",
+        "mensaje": f"Encolado correctamente para {alcance}. Destino: {destino}.",
+        "job_id": job_id,
+    }
+
+
+@app.get("/api/clientes-con-saldo")
+def listar_clientes():
+    """Devuelve la lista de clientes con saldo directamente desde SAP (Rápido por estar en red local)"""
+    conn = ServiceLayerConnection(use_test_db=False)
+    if not conn.login():
+        return {"estado": "error", "mensaje": "No se pudo conectar a SAP SL"}
+
+    try:
+        # Esto jalará todos los clientes usando la paginación que ya tenías programada
+        clientes = obtener_clientes_con_saldo(conn)
+        return {"estado": "exito", "total": len(clientes), "clientes": clientes}
+    except Exception as e:
+        return {"estado": "error", "mensaje": str(e)}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8050)

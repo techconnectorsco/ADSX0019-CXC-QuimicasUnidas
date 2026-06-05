@@ -41,6 +41,8 @@ MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al cliente r
 EMAIL_LOG_CONTROL = [
     "credito@qu.cr",
     "devs@techconnectors.co",
+    "creditodenis@qu.cr",
+    "asistente1@powermotorsca.com",
 ]
 # EMAIL_LOG_CONTROL = "devs@techconnectors.co"  # Cambiar en producción
 

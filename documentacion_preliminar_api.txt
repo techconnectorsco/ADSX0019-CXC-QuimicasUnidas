@@ -1,0 +1,44 @@
+Documentación del Motor CXC (API Backend)
+Módulos de Automatización y Auditoría para Químicas Unidas
+
+Este ecosistema está compuesto por tres módulos principales, diseñados para ser consumidos por una API REST y ejecutados desde una WebApp (Orquestador). Cada script cumple un rol específico en el ciclo de vida de los Estados de Cuenta (CXC).
+
+1. main.py | El Motor de Producción (Envío a Clientes Reales)
+Este es el núcleo del sistema. Se encarga de extraer la información, aplicar las reglas de negocio (limpiar basura histórica, sumar saldos a favor, generar PDFs/Excels) y enviar los correos directamente a los clientes finales.
+
+¿Cómo funciona en la API?
+
+Sin parámetros: Lee la base de datos completa y procesa a todos los clientes que tengan saldo pendiente.
+
+Con parámetros (--clientes C0040,C0161): Filtra la base de datos y ejecuta el proceso real solo para los clientes indicados.
+
+Casos de uso en la WebApp de Tania:
+
+Botón "Ejecutar Cierre Quincenal": Dispara el script sin parámetros. Ejecuta a los 87+ clientes y sube todo a SharePoint.
+
+Botón "Reenviar Estado de Cuenta": Si un cliente llama diciendo que borró su correo, Tania pone el código (ej. C0040) en un buscador y le da a "Reenviar". El script genera los documentos frescos y se los envía al cliente real en segundos.
+
+2. forzar_envio_tania.py | El Escudo de Pre-visualización (Uso Interno)
+Este script es un "puente seguro". Reutiliza toda la inteligencia de main.py, pero intercepta la variable de destino en el último milisegundo para redirigir todos los correos generados única y exclusivamente al buzón de CXC (credito@qu.cr), protegiendo a los clientes de correos accidentales.
+
+¿Cómo funciona en la API?
+
+Requiere obligatoriamente el parámetro de los clientes (--clientes C0161). El sistema ignora si el cliente tiene bloqueado el envío automático en SAP y genera los documentos enviándolos a uso interno.
+
+Casos de uso en la WebApp de Tania:
+
+Botón "Pre-visualizar" / "Enviarme a mí": Tania necesita revisar cómo se ve el estado de cuenta de un cliente delicado (ej. El Colono) antes de mandárselo. Ingresa el código en la WebApp, hace clic aquí, y el sistema le envía el PDF y el Excel a su propio correo para que ella los revise, los descargue o los reenvíe manualmente si así lo desea.
+
+3. auditar_cliente.py | El Analista Forense (Herramienta de Diagnóstico)
+Este es un script de consulta de solo lectura (GET). No genera PDFs, no envía correos ni crea archivos; simplemente viaja a SAP Service Layer y extrae la radiografía contable y de configuración exacta de un Socio de Negocios para entender por qué el sistema lo procesa o lo ignora.
+
+¿Cómo funciona en la API?
+
+Recibe un único código de cliente como parámetro (C1061). Extrae: Datos Maestros (existencia, saldo total, bloqueos de envío), Facturas Vigentes, Notas de Crédito (post-2022) y Saldos a Favor (post-2022).
+
+Casos de uso en la WebApp de Tania:
+
+Módulo "Auditar Cliente" / "Diagnóstico": Tania nota que a un cliente no le llegó el estado de cuenta. En la WebApp escribe C1061 y presiona "Auditar". La API ejecuta este script y le devuelve en la pantalla (en una tabla o tarjeta) el resultado: "Error 404: El cliente no existe" o "Saldo en 0. Facturas abiertas: 0". Esto le da autonomía a Tania para entender las reglas de SAP sin necesidad de pedir soporte de TI.
+
+💡 Nota para la integración con la API (FastAPI / Flask):
+Dado que construiste esto en Python puro y con funciones bien separadas, tu API no necesitará ejecutar comandos de consola (os.system o subprocess). Tus endpoints simplemente podrán importar las funciones (ej. import main -> main.ejecutar_proceso_cxc(lista_clientes=["C0040"])), lo que hará que tu aplicación web sea extremadamente rápida, segura y elegante.
