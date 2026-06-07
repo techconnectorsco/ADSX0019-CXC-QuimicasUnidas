@@ -27,6 +27,9 @@ from Generarexcel import generar_excel_estado_cuenta
 import uuid
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from supabase_manager import verificar_estado_rpa, finalizar_y_reportar
+from global_status import status_global_ejecution
 
 # =============================================================================
 # CONSTANTES
@@ -752,6 +755,12 @@ def ejecutar_proceso_cxc(
     print(f"   Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     print("=" * 80)
 
+    inicio = time.time()
+
+    if not verificar_estado_rpa():
+        print("🚫 RPA desactivado administrativamente en Supabase.")
+        return
+
     conn = ServiceLayerConnection(use_test_db=False)
 
     if not conn.login():
@@ -789,6 +798,15 @@ def ejecutar_proceso_cxc(
             "enviados": 0,
             "sin_correo": 0,
             "errores": 0,
+            "deshabilitados": 0,
+            "sin_documentos": 0,
+            "pdfs": 0,
+            "fallos_envio": 0,
+            "total_docs": 0,
+            "monto_usd": 0.0,
+            "monto_crc": 0.0,
+            "vencido_usd": 0.0,
+            "vencido_crc": 0.0,
         }
 
         sp_uploader = SharePointUploader()
@@ -804,6 +822,7 @@ def ejecutar_proceso_cxc(
             if not cliente_permite_envio(cliente) and not lista_clientes:
                 print(f"   ⏭️ [{card_code}] Envío deshabilitado")
                 with lock:
+                    resultados["deshabilitados"] += 1
                     log_control.agregar_registro(
                         codigo=card_code,
                         nombre=card_name,
@@ -836,6 +855,7 @@ def ejecutar_proceso_cxc(
             if total_docs == 0:
                 print(f"   ⏭️ [{card_code}] Sin documentos pendientes")
                 with lock:
+                    resultados["sin_documentos"] += 1
                     log_control.agregar_registro(
                         codigo=card_code,
                         nombre=card_name,
@@ -854,6 +874,15 @@ def ejecutar_proceso_cxc(
 
             with lock:
                 resultados["procesados"] += 1
+                resultados["total_docs"] += total_docs
+                resultados["monto_usd"] += datos["totales"]["dolares"]
+                resultados["monto_crc"] += datos["totales"]["colones"]
+                resultados["vencido_usd"] += datos["rangos_vencimiento"]["USD"][
+                    "total_vencido"
+                ]
+                resultados["vencido_crc"] += datos["rangos_vencimiento"]["CRC"][
+                    "total_vencido"
+                ]
 
             # Verificar correos
             correos = datos["cliente"]["correos"]
@@ -953,12 +982,13 @@ def ejecutar_proceso_cxc(
                     print(f"   ⚠️ [{card_code}] Excepción en intento {intento}: {e}")
 
                 if not enviado and intento < intentos_max:
-                    import time
 
                     time.sleep(2)  # Pausa de seguridad para estabilizar la red
 
             # 3. Registro final en el log (Protegido con Lock)
             with lock:
+                if pdf_generado:
+                    resultados["pdfs"] += 1
                 if enviado:
                     resultados["enviados"] += 1
                     estado_txt = "enviado"
@@ -966,6 +996,7 @@ def ejecutar_proceso_cxc(
                 else:
                     print(f"   ❌ [{card_code}] AGOTADOS LOS {intentos_max} INTENTOS")
                     resultados["errores"] += 1
+                    resultados["fallos_envio"] += 1
                     estado_txt = "error"
                     obs_txt = f"Fallaron {intentos_max} intentos de envío"
 
@@ -1010,6 +1041,7 @@ def ejecutar_proceso_cxc(
 
         # 4. Generar y enviar log de control
         print("\n[LOG] Generando log de control...")
+        log_path = None
         try:
             log_path = log_control.generar_pdf()
             print(f"   [OK] Log generado: {log_path}")
@@ -1035,6 +1067,40 @@ def ejecutar_proceso_cxc(
 
         except Exception as e:
             print(f"   [ERROR] Error generando/enviando log: {str(e)}")
+
+        # === Consolidar métricas y reportar a Supabase ===
+        status_global_ejecution["tiempo_ejecucion"] = round(time.time() - inicio, 2)
+        status_global_ejecution["total_clientes"] = len(clientes)
+        status_global_ejecution["clientes_procesados"] = resultados["procesados"]
+        status_global_ejecution["clientes_omitidos_N"] = resultados["deshabilitados"]
+        status_global_ejecution["clientes_sin_documentos"] = resultados[
+            "sin_documentos"
+        ]
+        status_global_ejecution["clientes_sin_correo"] = resultados["sin_correo"]
+        status_global_ejecution["total_documentos_procesados"] = resultados[
+            "total_docs"
+        ]
+        status_global_ejecution["reportes_generados"] = resultados["pdfs"]
+        status_global_ejecution["emails_exitosos"] = resultados["enviados"]
+        status_global_ejecution["emails_fallidos"] = resultados["fallos_envio"]
+        status_global_ejecution["monto_total_usd"] = round(resultados["monto_usd"], 2)
+        status_global_ejecution["monto_total_colones"] = round(
+            resultados["monto_crc"], 2
+        )
+        status_global_ejecution["monto_vencido_usd"] = round(
+            resultados["vencido_usd"], 2
+        )
+        status_global_ejecution["monto_vencido_colones"] = round(
+            resultados["vencido_crc"], 2
+        )
+
+        errores_gen = resultados["errores"] - resultados["fallos_envio"]
+        if errores_gen > 0:
+            status_global_ejecution["observaciones"] = (
+                f"{errores_gen} error(es) de generación (PDF/datos)"
+            )
+
+        finalizar_y_reportar(status_global_ejecution, log_path)
 
         print("\n" + "=" * 80)
         print("✅ PROCESO FINALIZADO")
@@ -1067,4 +1133,17 @@ if __name__ == "__main__":
 
     codigos = args.clientes.split(",") if args.clientes else None
 
-    ejecutar_proceso_cxc(lista_clientes=codigos, modo_test_limite=args.test)
+    # Tipo de ejecución para métricas
+    if codigos:
+        status_global_ejecution["tipo_ejecucion"] = "Personalizada"
+    elif args.test:
+        status_global_ejecution["tipo_ejecucion"] = "Prueba"
+    # si no, queda "Automatica" (valor por defecto del global_status)
+
+    try:
+        ejecutar_proceso_cxc(lista_clientes=codigos, modo_test_limite=args.test)
+    except Exception as e:
+        print(f"❌ Error crítico en ejecución general: {e}")
+        status_global_ejecution["error_critico"] = True
+        status_global_ejecution["observaciones"] = f"Falla de sistema: {str(e)}"
+        finalizar_y_reportar(status_global_ejecution)

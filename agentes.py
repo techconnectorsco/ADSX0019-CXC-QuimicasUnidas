@@ -7,6 +7,9 @@ import sys
 import os
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
+import time
+from supabase_manager import verificar_estado_rpa, finalizar_y_reportar, ID_RPA_QU_GIRAS
+from global_status_giras import status_global_giras
 
 # Agregar path del proyecto
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,9 +25,9 @@ import uuid
 # CONSTANTES
 # =============================================================================
 
-# EMAIL_PRUEBA = "devs@techconnectors.co"
+EMAIL_PRUEBA = "devs@techconnectors.co"
 # EMAIL_PRUEBA = "credito@qu.cr"
-MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
+MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
 
 # AGENTES PERMITIDOS: Siviany (6), Berny (7), José (9)
 # AGENTES_VALIDOS = {6, 7, 9}
@@ -32,10 +35,10 @@ MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al correo de
 # CORREOS EN COPIA (CC) SOLICITADOS POR TANIA
 CORREOS_CC = [
     "dev@soportexperto.com",
-    "erich.hoepker@qu.cr",
-    "apuschendorf@qu.cr",
-    "creditodenis@qu.cr",
-    "credito@qu.cr",
+    # "erich.hoepker@qu.cr",
+    # "apuschendorf@qu.cr",
+    # "creditodenis@qu.cr",
+    # "credito@qu.cr",
 ]
 
 TIPOS_QUE_RESTAN = {
@@ -334,8 +337,45 @@ def ejecutar_sql_sl(conn: ServiceLayerConnection, sql: str) -> List[Dict]:
     return res.get("value", []) if res else []
 
 
+def obtener_saldos_favor_masivo(
+    conn: ServiceLayerConnection, card_codes: List[str], lote: int = 100
+) -> Dict[str, List[Dict]]:
+    """
+    Trae en pocos queries (no uno por cliente) los saldos a favor de JDT1
+    para todos los clientes, agrupados por ShortName (card_code).
+    """
+    cache: Dict[str, List[Dict]] = {}
+    codigos = [c for c in card_codes if c]
+
+    for i in range(0, len(codigos), lote):
+        bloque = codigos[i : i + lote]
+        lista_in = ", ".join([f"'{c}'" for c in bloque])
+        sql = f"""
+            SELECT 
+                T0."ShortName",
+                T0."RefDate", 
+                T0."BaseRef" AS "DocNum", 
+                T0."TransType", 
+                T0."BalDueCred", 
+                T0."BalFcCred", 
+                T0."FCCurrency", 
+                T0."LineMemo" 
+            FROM "JDT1" T0 
+            WHERE T0."ShortName" IN ({lista_in}) 
+              AND T0."BalDueCred" > 0 
+              AND T0."RefDate" >= '20220101'
+              AND T0."TransType" NOT IN ('13', '14', '30')
+        """
+        filas = ejecutar_sql_sl(conn, sql)
+        for r in filas:
+            sn = str(r.get("ShortName", ""))
+            cache.setdefault(sn, []).append(r)
+
+    return cache
+
+
 def obtener_documentos_cliente(
-    conn: ServiceLayerConnection, cliente_info: Dict
+    conn: ServiceLayerConnection, cliente_info: Dict, saldos_favor_cache: Dict = None
 ) -> List[Dict]:
     documentos = []
     card_code = cliente_info.get("CardCode")
@@ -378,25 +418,8 @@ def obtener_documentos_cliente(
             doc["vendedor_final"] = mapeo_dir.get(destino, vendedor_general)
             documentos.append(doc)
 
-    # 3. SALDOS A FAVOR (Lectura directa de JDT1 - Pagos y Asientos Manuales)
-    # AÑADIDO: T0."TransType" NOT IN ('13', '14') para evitar duplicar las Notas de Crédito
-    sql_pr = f"""
-        SELECT 
-            T0."RefDate", 
-            T0."BaseRef" AS "DocNum", 
-            T0."TransType", 
-            T0."BalDueCred", 
-            T0."BalFcCred", 
-            T0."FCCurrency", 
-            T0."LineMemo" 
-        FROM "JDT1" T0 
-        WHERE T0."ShortName" = '{card_code}' 
-          AND T0."BalDueCred" > 0 
-          AND T0."RefDate" >= '20220101'
-          AND T0."TransType" NOT IN ('13', '14', '30')
-    """
-
-    filas_pr = ejecutar_sql_sl(conn, sql_pr)
+    # 3. SALDOS A FAVOR (desde el cache masivo: ya NO se hace un query por cliente)
+    filas_pr = (saldos_favor_cache or {}).get(card_code, [])
 
     for r in filas_pr:
         moneda_linea = r.get("FCCurrency")
@@ -439,7 +462,10 @@ def obtener_documentos_cliente(
 
 
 def procesar_datos_cliente(
-    conn: ServiceLayerConnection, cliente: Dict, descuentos_cache: Dict
+    conn: ServiceLayerConnection,
+    cliente: Dict,
+    descuentos_cache: Dict,
+    saldos_favor_cache: Dict = None,
 ) -> List[Dict]:
     """
     Procesa un cliente y devuelve UNA LISTA de diccionarios,
@@ -462,7 +488,7 @@ def procesar_datos_cliente(
     moneda_bp = cliente.get("Currency", "CRC")
     moneda_limite = "USD" if moneda_bp in ["USD", "US$"] else "CRC"
 
-    todos_docs = obtener_documentos_cliente(conn, cliente)
+    todos_docs = obtener_documentos_cliente(conn, cliente, saldos_favor_cache)
     if not todos_docs:
         return []
 
@@ -570,6 +596,12 @@ def ejecutar_reportes_gira(agente_id: str = None):
     print(f"   Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     print("=" * 80)
 
+    inicio = time.time()
+
+    if not verificar_estado_rpa():
+        print("🚫 RPA desactivado administrativamente en Supabase.")
+        return
+
     conn = ServiceLayerConnection(use_test_db=False)
     if not conn.login():
         print("❌ Error de conexión a SAP")
@@ -590,6 +622,10 @@ def ejecutar_reportes_gira(agente_id: str = None):
         if not clientes:
             return
 
+        print("📋 Obteniendo saldos a favor (consulta masiva)...")
+        card_codes = [c.get("CardCode") for c in clientes if c.get("CardCode")]
+        saldos_favor_cache = obtener_saldos_favor_masivo(conn, card_codes)
+
         print("\n🔄 Evaluando facturas y asignando agentes por Zona (Multihilo)...")
         agrupados_por_agente = {}
         total_cli = len(clientes)
@@ -599,10 +635,13 @@ def ejecutar_reportes_gira(agente_id: str = None):
         # PROCESAMIENTO MULTIHILO (Para mayor velocidad)
         # =====================================================================
         with ThreadPoolExecutor(max_workers=4) as executor:
-            # Lanzamos todas las peticiones a SAP en paralelo
             futuros = {
                 executor.submit(
-                    procesar_datos_cliente, conn, cli, descuentos_cache
+                    procesar_datos_cliente,
+                    conn,
+                    cli,
+                    descuentos_cache,
+                    saldos_favor_cache,
                 ): cli
                 for cli in clientes
             }
@@ -649,7 +688,19 @@ def ejecutar_reportes_gira(agente_id: str = None):
         # =====================================================================
         sender = EmailSenderAgente()
         sp_uploader = SharePointUploader()
-        resultados = {"procesados": 0, "enviados": 0, "errores": 0, "sin_correo": 0}
+        resultados = {
+            "procesados": 0,
+            "enviados": 0,
+            "errores": 0,
+            "sin_correo": 0,
+            "pdfs": 0,
+            "fallos_envio": 0,
+            "total_docs": 0,
+            "monto_usd": 0.0,
+            "monto_crc": 0.0,
+            "vencido_usd": 0.0,
+            "vencido_crc": 0.0,
+        }
 
         for vendedor_id, clientes_del_agente in agrupados_por_agente.items():
 
@@ -709,9 +760,26 @@ def ejecutar_reportes_gira(agente_id: str = None):
             )
             resultados["procesados"] += 1
 
+            # Métricas: documentos y montos de este agente
+            resultados["monto_usd"] += datos_reporte["totales_agente"]["dolares"]
+            resultados["monto_crc"] += datos_reporte["totales_agente"]["colones"]
+            for datos_cli in datos_reporte["clientes"]:
+                docs_cli = (
+                    datos_cli["documentos"]["colones"]
+                    + datos_cli["documentos"]["dolares"]
+                )
+                resultados["total_docs"] += len(docs_cli)
+                for d in docs_cli:
+                    if d.get("esta_vencido") and d["saldo"] > 0:
+                        if d["moneda"] == "USD":
+                            resultados["vencido_usd"] += d["saldo"]
+                        else:
+                            resultados["vencido_crc"] += d["saldo"]
+
             try:
                 pdf_path = generar_pdf_reporte_gira(datos_reporte)
                 print(f"   📄 PDF Generado: {pdf_path}")
+                resultados["pdfs"] += 1
                 sp_uploader.upload_reporte(pdf_path, "Giras")
 
                 correo_sap = info_vendedor.get("correo", "")
@@ -739,6 +807,7 @@ def ejecutar_reportes_gira(agente_id: str = None):
                 else:
                     print(f"   ❌ Error al enviar el correo.")
                     resultados["errores"] += 1
+                    resultados["fallos_envio"] += 1
 
             except Exception as e:
                 print(f"   ❌ Error procesando agente {nombre_agente}: {str(e)}")
@@ -752,6 +821,36 @@ def ejecutar_reportes_gira(agente_id: str = None):
         print(f"   Agentes sin correo: {resultados['sin_correo']}")
         print(f"   Errores: {resultados['errores']}")
         print("=" * 80)
+
+        # === Consolidar métricas y reportar a Supabase (proceso Giras) ===
+        status_global_giras["tiempo_ejecucion"] = round(time.time() - inicio, 2)
+        status_global_giras["total_clientes"] = len(clientes)
+        status_global_giras["clientes_evaluados"] = procesados
+        status_global_giras["total_agentes"] = len(agrupados_por_agente)
+        status_global_giras["agentes_procesados"] = resultados["procesados"]
+        status_global_giras["reportes_generados"] = resultados["pdfs"]
+        status_global_giras["total_documentos_procesados"] = resultados["total_docs"]
+        status_global_giras["emails_exitosos"] = resultados["enviados"]
+        status_global_giras["emails_fallidos"] = resultados["fallos_envio"]
+        status_global_giras["monto_total_usd"] = round(resultados["monto_usd"], 2)
+        status_global_giras["monto_total_colones"] = round(resultados["monto_crc"], 2)
+        status_global_giras["monto_vencido_usd"] = round(resultados["vencido_usd"], 2)
+        status_global_giras["monto_vencido_colones"] = round(
+            resultados["vencido_crc"], 2
+        )
+
+        errores_gen = resultados["errores"] - resultados["fallos_envio"]
+        if errores_gen > 0:
+            status_global_giras["observaciones"] = (
+                f"{errores_gen} error(es) de generación/proceso"
+            )
+
+        finalizar_y_reportar(
+            status_global_giras,
+            None,
+            automatizacion_id=ID_RPA_QU_GIRAS,
+            subcarpeta="giras",
+        )
 
     finally:
         conn.logout()
@@ -776,4 +875,21 @@ if __name__ == "__main__":
 
     args, unknown = parser.parse_known_args()
 
-    ejecutar_reportes_gira(agente_id=args.agente)
+    # Tipo de ejecución para métricas
+    if args.agente:
+        status_global_giras["tipo_ejecucion"] = "Personalizada"
+    elif "--test" in sys.argv:
+        status_global_giras["tipo_ejecucion"] = "Prueba"
+
+    try:
+        ejecutar_reportes_gira(agente_id=args.agente)
+    except Exception as e:
+        print(f"❌ Error crítico en ejecución general: {e}")
+        status_global_giras["error_critico"] = True
+        status_global_giras["observaciones"] = f"Falla de sistema: {str(e)}"
+        finalizar_y_reportar(
+            status_global_giras,
+            None,
+            automatizacion_id=ID_RPA_QU_GIRAS,
+            subcarpeta="giras",
+        )
