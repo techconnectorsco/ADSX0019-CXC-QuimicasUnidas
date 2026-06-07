@@ -1,3 +1,11 @@
+# 🔥 PARCHE ANTI-CRASH PARA PYTHONW (Sin Ventana)
+# Uvicorn necesita escribir logs. Si corre sin ventana, sys.stdout es None y se cae.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
+
 import sys
 import os
 import threading
