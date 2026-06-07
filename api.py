@@ -1,39 +1,50 @@
-import sys
 import os
+import sys
 
-# 🔥 PARCHE ANTI-CRASH PARA PYTHONW (Sin Ventana)
-# Uvicorn necesita escribir logs. Si corre sin ventana, sys.stdout es None y se cae.
+# ==============================================================================
+# 1. PARCHE DE ENTORNO (PATH Y ENCODING PARA WINDOWS)
+# ==============================================================================
+# Asegurar que el script encuentre main.py y los módulos locales de inmediato
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+# Parche anti-crash para entornos sin ventana + Forzar UTF-8 nativo en consola Windows
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w")
+elif hasattr(sys.stdout, "reconfigure"):
+    # Esto inmuniza los prints contra acentos, eñes y caracteres raros de SAP
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
+elif hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
-import sys
-import os
-import threading
+# ==============================================================================
+# 2. IMPORTS SÓLIDOS (Llamados después de asegurar los paths)
+# ==============================================================================
 import queue
+import threading
 import uuid
-from fastapi import FastAPI
-from pydantic import BaseModel
 from typing import List, Optional
-import uvicorn
-from modules.database.conexion import ServiceLayerConnection
-from main import obtener_clientes_con_saldo
 
-# Asegurar que el script encuentre main.py
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import main
+import uvicorn
+from fastapi import FastAPI
+from main import obtener_clientes_con_saldo
+from modules.database.conexion import ServiceLayerConnection
+from pydantic import BaseModel
 
 # ==========================================
 # INICIALIZACIÓN
 # ==========================================
 app = FastAPI(title="API RPA CXC - Sistema de Colas Local")
-
 cola_tareas = queue.Queue()
 
 
-# Actualizado para que coincida exactamente con el payload de SvelteKit
+# Payload coordinado con la interfaz Svelte
 class PeticionCXC(BaseModel):
     clientes: List[str] = []
     solo_prueba: bool = False
@@ -56,13 +67,13 @@ def procesador_cola():
         correo_destino = tarea["correo_destino"]
         correo_logs = tarea["correo_logs"]
 
-        print(f"\n[{job_id}] 🔄 Iniciando trabajo encolado...")
+        print(f"\n[{job_id}] Iniciando trabajo...")
 
         try:
             # 1. Configurar destino del Log de Control
             if correo_logs:
                 main.EMAIL_LOG_CONTROL = [correo_logs]
-                print(f"[{job_id}] ⚙️ LOGS: Redirigidos a {correo_logs}")
+                print(f"[{job_id}] LOGS: Redirigidos a {correo_logs}")
             else:
                 main.EMAIL_LOG_CONTROL = [
                     "credito@qu.cr",
@@ -70,49 +81,45 @@ def procesador_cola():
                     "creditodenis@qu.cr",
                     "asistente1@powermotorsca.com",
                 ]
-                print(f"[{job_id}] ⚙️ LOGS: Enviados al equipo completo por defecto")
+                print(f"[{job_id}] LOGS: Enviados al equipo completo por defecto")
 
             # 2. Configurar modo Prueba vs Real (Destino de los PDFs)
             if solo_prueba:
                 main.MODO_PRUEBA = True
-                # Usar el correo dinámico de la web, o un fallback de seguridad
                 correo_prueba_final = (
                     correo_destino if correo_destino else "devs@techconnectors.co"
                 )
                 main.EMAIL_PRUEBA = correo_prueba_final
-
-                print(
-                    f"[{job_id}] ⚙️ MODO PRUEBA: PDFs enviados a {correo_prueba_final}"
-                )
+                print(f"[{job_id}] MODO PRUEBA: PDFs enviados a {correo_prueba_final}")
             else:
                 main.MODO_PRUEBA = False
                 print(
-                    f"[{job_id}] ⚙️ MODO REAL: Correos enviados directamente a los clientes"
+                    f"[{job_id}] MODO REAL: Correos enviados directamente a los clientes"
                 )
 
             # 3. Alcance de ejecución
             if clientes is None:
                 print(
-                    f"[{job_id}] 🌍 ALCANCE: Ejecutando para TODOS los clientes con saldo"
+                    f"[{job_id}] ALCANCE: Ejecutando para TODOS los clientes con saldo"
                 )
             else:
                 print(
-                    f"[{job_id}] 🎯 ALCANCE: Ejecutando para {len(clientes)} clientes específicos"
+                    f"[{job_id}] ALCANCE: Ejecutando para {len(clientes)} clientes específicos"
                 )
 
-            # 4. Ejecutar el proceso principal
+            # 4. Ejecutar el proceso principal en main.py
             main.ejecutar_proceso_cxc(lista_clientes=clientes)
-
-            print(f"[{job_id}] ✅ Trabajo finalizado con éxito.")
+            print(f"[{job_id}] Trabajo finalizado con éxito.")
 
         except Exception as e:
-            print(f"[{job_id}] ❌ Error en el proceso: {str(e)}")
+            # Gracias al reconfigure de arriba, si 'e' trae acentos o texto raro, ya no crashea
+            print(f"[{job_id}] Error en el proceso: {str(e)}")
 
         finally:
             cola_tareas.task_done()
 
 
-# Arrancar el trabajador al iniciar la API
+# Arrancar el trabajador en segundo plano
 threading.Thread(target=procesador_cola, daemon=True).start()
 
 
@@ -123,7 +130,6 @@ threading.Thread(target=procesador_cola, daemon=True).start()
 
 @app.get("/api/health")
 def health_check():
-    """Verifica si la API está online y el estado de la cola de tareas"""
     return {
         "estado": "online",
         "mensaje": "API RPA CXC operando correctamente en segundo plano",
@@ -139,7 +145,6 @@ def encolar_rpa(peticion: PeticionCXC):
             "mensaje": "Debe seleccionar clientes o activar la opción 'ejecutar_todos'",
         }
 
-    # Validación adicional: si es modo prueba, exigir el correo destino
     if peticion.solo_prueba and not peticion.correo_destino:
         return {
             "estado": "error",
@@ -149,7 +154,6 @@ def encolar_rpa(peticion: PeticionCXC):
     job_id = str(uuid.uuid4())[:8]
     clientes_a_procesar = None if peticion.ejecutar_todos else peticion.clientes
 
-    # Mandar a la cola local
     cola_tareas.put(
         {
             "job_id": job_id,
@@ -171,14 +175,13 @@ def encolar_rpa(peticion: PeticionCXC):
 
     return {
         "estado": "exito",
-        "mensaje": f"Encolado correctamente para {alcance}. PDFs a: {destino_pdf}.",
+        "mensaje": f"Enviado correctamente para {alcance}. PDFs a: {destino_pdf}.",
         "job_id": job_id,
     }
 
 
 @app.get("/api/clientes-con-saldo")
 def listar_clientes():
-    """Devuelve la lista de clientes con saldo directamente desde SAP (Rápido por estar en red local)"""
     conn = ServiceLayerConnection(use_test_db=False)
     if not conn.login():
         return {"estado": "error", "mensaje": "No se pudo conectar a SAP SL"}
