@@ -1,3 +1,6 @@
+import sys
+import os
+
 # 🔥 PARCHE ANTI-CRASH PARA PYTHONW (Sin Ventana)
 # Uvicorn necesita escribir logs. Si corre sin ventana, sys.stdout es None y se cae.
 if sys.stdout is None:
