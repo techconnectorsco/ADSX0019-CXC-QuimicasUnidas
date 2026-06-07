@@ -108,6 +108,18 @@ threading.Thread(target=procesador_cola, daemon=True).start()
 # ==========================================
 # ENDPOINTS DE LA API
 # ==========================================
+
+
+@app.get("/api/health")
+def health_check():
+    """Verifica si la API está online y el estado de la cola de tareas"""
+    return {
+        "estado": "online",
+        "mensaje": "API RPA CXC operando correctamente en segundo plano",
+        "tareas_en_cola": cola_tareas.qsize(),
+    }
+
+
 @app.post("/api/ejecutar-cxc")
 def encolar_rpa(peticion: PeticionCXC):
     if not peticion.ejecutar_todos and not peticion.clientes:
