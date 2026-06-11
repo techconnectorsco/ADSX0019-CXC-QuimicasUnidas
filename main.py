@@ -37,7 +37,7 @@ from global_status import status_global_ejecution
 
 # Email para pruebas (comentar en producción)
 # EMAIL_PRUEBA = "credito@qu.cr"
-EMAIL_PRUEBA = "devs@techconnectors.co"
+EMAIL_PRUEBA = ["devs@techconnectors.co"]
 MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al cliente real
 
 # Email para enviar el log de control (en producción: encargada de CXC)
@@ -543,23 +543,25 @@ def extraer_correos_de_texto(texto: str) -> List[str]:
 
 def parsear_correos_campo(valor: str) -> List[str]:
     """
-    Parsea un campo que puede tener múltiples correos separados por:
-    coma, punto y coma, o espacio.
+    Parsea un string con múltiples correos separados por coma,
+    punto y coma o espacios de manera limpia y segura usando Regex.
     """
-    if not valor:
+    import re
+
+    if not valor or not str(valor).strip():
         return []
 
-    # Reemplazar separadores por coma
-    valor = valor.replace(";", ",").replace(" ", ",")
+    # Divide por cualquier combinación de ;, o espacios concurrentes
+    elementos = re.split(r"[;,\s]+", str(valor))
 
-    # Separar y limpiar
-    correos = []
-    for parte in valor.split(","):
-        parte = parte.strip().lower()
-        if "@" in parte and "." in parte:
-            correos.append(parte)
+    # Filtra espacios residuales, vacíos y valida estructura mínima de email
+    correos_limpios = []
+    for c in elementos:
+        c_clean = c.strip().lower()
+        if "@" in c_clean and "." in c_clean:
+            correos_limpios.append(c_clean)
 
-    return list(set(correos))
+    return list(set(correos_limpios))
 
 
 def determinar_correos_cliente(cliente: Dict) -> List[str]:
