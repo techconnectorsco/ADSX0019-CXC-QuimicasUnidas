@@ -943,7 +943,9 @@ def ejecutar_proceso_cxc(
 
             # Enviar correo
             if MODO_PRUEBA:
-                destinatarios = [EMAIL_PRUEBA]
+                destinatarios = (
+                    EMAIL_PRUEBA if isinstance(EMAIL_PRUEBA, list) else [EMAIL_PRUEBA]
+                )
                 print(
                     f"   📧 [{card_code}] MODO PRUEBA: Direccionando a {EMAIL_PRUEBA}"
                 )

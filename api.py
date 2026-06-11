@@ -72,7 +72,7 @@ def procesador_cola():
         try:
             # 1. Configurar destino del Log de Control
             if correo_logs:
-                main.EMAIL_LOG_CONTROL = [correo_logs]
+                main.EMAIL_LOG_CONTROL = main.parsear_correos_campo(correo_logs)
                 print(f"[{job_id}] LOGS: Redirigidos a {correo_logs}")
             else:
                 main.EMAIL_LOG_CONTROL = [
@@ -89,7 +89,7 @@ def procesador_cola():
                 correo_prueba_final = (
                     correo_destino if correo_destino else "devs@techconnectors.co"
                 )
-                main.EMAIL_PRUEBA = correo_prueba_final
+                main.EMAIL_PRUEBA = main.parsear_correos_campo(correo_prueba_final)
                 print(f"[{job_id}] MODO PRUEBA: PDFs enviados a {correo_prueba_final}")
             else:
                 main.MODO_PRUEBA = False
