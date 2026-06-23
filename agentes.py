@@ -27,7 +27,7 @@ import uuid
 
 EMAIL_PRUEBA = "devs@techconnectors.co"
 # EMAIL_PRUEBA = "credito@qu.cr"
-MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
+MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
 
 # AGENTES PERMITIDOS: Siviany (6), Berny (7), José (9)
 # AGENTES_VALIDOS = {6, 7, 9}
@@ -35,10 +35,10 @@ MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al correo de
 # CORREOS EN COPIA (CC) SOLICITADOS POR TANIA
 CORREOS_CC = [
     "dev@soportexperto.com",
-    "erich.hoepker@qu.cr",
-    "apuschendorf@qu.cr",
-    "creditodenis@qu.cr",
-    "credito@qu.cr",
+    # "erich.hoepker@qu.cr",
+    # "apuschendorf@qu.cr",
+    # "creditodenis@qu.cr",
+    # "credito@qu.cr",
 ]
 
 TIPOS_QUE_RESTAN = {
@@ -128,43 +128,19 @@ def obtener_clientes_con_saldo(
         return obtener_todos_paginado(conn, "BusinessPartners", params, "CardCode")
 
 
-def obtener_descuentos_frecuentes(conn: ServiceLayerConnection) -> Dict[str, float]:
-    """
-    Obtiene el descuento más frecuente mayor a 0 para cada cliente
-    basado en su historial REAL de facturación desde 2022.
-    """
-    # Consulta masiva: agrupamos por Cliente y por Porcentaje de Descuento
-    sql = """
-        SELECT 
-            T0."CardCode",
-            T1."DiscPrcnt" AS "Descuento", 
-            COUNT(T1."DiscPrcnt") AS "Freq"
-        FROM "OINV" T0
-        INNER JOIN "INV1" T1 ON T0."DocEntry" = T1."DocEntry"
-        WHERE T1."DiscPrcnt" > 0 
-          AND T0."DocDate" >= '20220101'
-        GROUP BY T0."CardCode", T1."DiscPrcnt"
-    """
-    resultados = ejecutar_sql_sl(conn, sql)
+def cargar_descuentos() -> Dict[str, float]:
+    """Carga descuentos precalculados desde descuentos.json (raíz del proyecto)."""
+    import json
 
-    temp_dict = {}
-    for r in resultados:
-        code = str(r.get("CardCode", ""))
-        disc = float(r.get("Descuento", 0))
-        freq = int(r.get("Freq", 0))
-
-        if code not in temp_dict:
-            temp_dict[code] = []
-        temp_dict[code].append((disc, freq))
-
-    descuentos_final = {}
-    for code, values in temp_dict.items():
-        # Ordenamos por frecuencia (mayor a menor) usando Python
-        values.sort(key=lambda x: (x[1], x[0]), reverse=True)
-        # Tomamos el descuento que más se ha usado (el primer elemento)
-        descuentos_final[code] = values[0][0]
-
-    return descuentos_final
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "descuentos.json")
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(
+            "   ⚠️ descuentos.json no existe. Corré generar_descuentos.py. Usando 0%."
+        )
+        return {}
 
 
 def obtener_vendedores(conn: ServiceLayerConnection) -> Dict[int, Dict]:
@@ -478,10 +454,13 @@ def procesar_datos_cliente(
         conn, cliente.get("PayTermsGrpCode")
     )
 
-    descuento_general = float(cliente.get("DiscountPercent", 0) or 0)
-    # Busca la "moda" del descuento. Si no tiene, usa el general
-    descuento_porcent = descuentos_cache.get(card_code, descuento_general)
-    # ---------------------------------------------------------
+    # Descuento propio del cliente (desde JSON precalculado)
+    descuento_porcent = float(descuentos_cache.get(card_code, 0) or 0)
+    # Herencia padre→hijo: si la sucursal no tiene descuento propio, usa el del padre
+    if descuento_porcent == 0:
+        father = cliente.get("FatherCard")
+        if father:
+            descuento_porcent = float(descuentos_cache.get(father, 0) or 0)
 
     grupo_descuento = cliente.get("GroupCode", -1)
 
@@ -611,8 +590,8 @@ def ejecutar_reportes_gira(agente_id: str = None):
         print("\n📋 Obteniendo listado de Agentes...")
         vendedores_cache = obtener_vendedores(conn)
 
-        print("📋 Obteniendo matriz de descuentos frecuentes...")
-        descuentos_cache = obtener_descuentos_frecuentes(conn)
+        print("📋 Cargando descuentos precalculados (descuentos.json)...")
+        descuentos_cache = cargar_descuentos()
 
         print("📋 Obteniendo clientes con saldo...")
         clientes = obtener_clientes_con_saldo(
