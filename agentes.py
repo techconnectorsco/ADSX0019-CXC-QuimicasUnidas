@@ -27,7 +27,7 @@ import uuid
 
 EMAIL_PRUEBA = "devs@techconnectors.co"
 # EMAIL_PRUEBA = "credito@qu.cr"
-MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
+MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
 
 # AGENTES PERMITIDOS: Siviany (6), Berny (7), José (9)
 # AGENTES_VALIDOS = {6, 7, 9}
@@ -35,10 +35,10 @@ MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al correo del
 # CORREOS EN COPIA (CC) SOLICITADOS POR TANIA
 CORREOS_CC = [
     "dev@soportexperto.com",
-    # "erich.hoepker@qu.cr",
-    # "apuschendorf@qu.cr",
-    # "creditodenis@qu.cr",
-    # "credito@qu.cr",
+    "erich.hoepker@qu.cr",
+    "apuschendorf@qu.cr",
+    "creditodenis@qu.cr",
+    "credito@qu.cr",
 ]
 
 TIPOS_QUE_RESTAN = {
