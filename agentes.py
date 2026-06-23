@@ -314,16 +314,20 @@ def ejecutar_sql_sl(conn: ServiceLayerConnection, sql: str) -> List[Dict]:
 
 
 def obtener_saldos_favor_masivo(
-    conn: ServiceLayerConnection, card_codes: List[str], lote: int = 100
+    conn: ServiceLayerConnection,
+    card_codes: List[str],
+    lote: int = 15,  # <--- Bajamos a 15
 ) -> Dict[str, List[Dict]]:
-    """
-    Trae en pocos queries (no uno por cliente) los saldos a favor de JDT1
-    para todos los clientes, agrupados por ShortName (card_code).
-    """
     cache: Dict[str, List[Dict]] = {}
     codigos = [c for c in card_codes if c]
+    total_lotes = (len(codigos) + lote - 1) // lote  # <--- Agregamos esto
 
     for i in range(0, len(codigos), lote):
+        lote_actual = (i // lote) + 1  # <--- Agregamos esto
+        print(
+            f"   ⏳ Consultando JDT1: Lote {lote_actual}/{total_lotes}...", end="\r"
+        )  # <--- Agregamos esto para ver que no se congela
+
         bloque = codigos[i : i + lote]
         lista_in = ", ".join([f"'{c}'" for c in bloque])
         sql = f"""
@@ -613,7 +617,7 @@ def ejecutar_reportes_gira(agente_id: str = None):
         # =====================================================================
         # PROCESAMIENTO MULTIHILO (Para mayor velocidad)
         # =====================================================================
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=12) as executor:
             futuros = {
                 executor.submit(
                     procesar_datos_cliente,
