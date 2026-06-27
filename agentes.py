@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 import time
+from collections import Counter
 from supabase_manager import verificar_estado_rpa, finalizar_y_reportar, ID_RPA_QU_GIRAS
 from global_status_giras import status_global_giras
 
@@ -27,7 +28,7 @@ import uuid
 
 EMAIL_PRUEBA = "devs@techconnectors.co"
 # EMAIL_PRUEBA = "credito@qu.cr"
-MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
+MODO_PRUEBA = True  # True = envía a EMAIL_PRUEBA, False = envía al correo del agente
 
 # AGENTES PERMITIDOS: Siviany (6), Berny (7), José (9)
 # AGENTES_VALIDOS = {6, 7, 9}
@@ -35,10 +36,10 @@ MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al correo de
 # CORREOS EN COPIA (CC) SOLICITADOS POR TANIA
 CORREOS_CC = [
     "dev@soportexperto.com",
-    "erich.hoepker@qu.cr",
-    "apuschendorf@qu.cr",
-    "creditodenis@qu.cr",
-    "credito@qu.cr",
+    # "erich.hoepker@qu.cr",
+    # "apuschendorf@qu.cr",
+    # "creditodenis@qu.cr",
+    # "credito@qu.cr",
 ]
 
 TIPOS_QUE_RESTAN = {
@@ -128,19 +129,39 @@ def obtener_clientes_con_saldo(
         return obtener_todos_paginado(conn, "BusinessPartners", params, "CardCode")
 
 
-def cargar_descuentos() -> Dict[str, float]:
-    """Carga descuentos precalculados desde descuentos.json (raíz del proyecto)."""
-    import json
+def calcular_descuento_bp(grupos: List[Dict]) -> float:
+    """
+    Descuento del cliente = el % que más se repite entre sus DiscountGroups (>0).
+    Es la fuente real configurada en SAP (la misma que ve la encargada).
 
-    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "descuentos.json")
+    IMPORTANTE: idéntico al método validado contra los 10 clientes del correo
+    de Tania. Misma extracción (DiscountPercentage), mismo filtro (>0),
+    misma moda (Counter + max con desempate por mayor valor).
+    """
+    valores = [
+        float(g.get("DiscountPercentage", 0) or 0)
+        for g in (grupos or [])
+        if float(g.get("DiscountPercentage", 0) or 0) > 0
+    ]
+    if not valores:
+        return 0.0
+    conteo = Counter(valores)
+    # Más frecuente; desempate: el mayor
+    return max(conteo.items(), key=lambda x: (x[1], x[0]))[0]
+
+
+def obtener_descuento_cliente(conn: ServiceLayerConnection, card_code: str) -> float:
+    """
+    Trae el BP (completo, sin $select porque DiscountGroups no responde a $select)
+    y devuelve el descuento por moda. Se usa para la herencia padre->hijo.
+    """
     try:
-        with open(ruta, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(
-            "   ⚠️ descuentos.json no existe. Corré generar_descuentos.py. Usando 0%."
-        )
-        return {}
+        bp = conn.get(f"BusinessPartners('{card_code}')", {})
+        if bp:
+            return calcular_descuento_bp(bp.get("DiscountGroups", []))
+    except:
+        pass
+    return 0.0
 
 
 def obtener_vendedores(conn: ServiceLayerConnection) -> Dict[int, Dict]:
@@ -157,27 +178,37 @@ def obtener_vendedores(conn: ServiceLayerConnection) -> Dict[int, Dict]:
     return vendedores
 
 
-def obtener_contacto_principal(
+def obtener_contacto_y_descuento(
     conn: ServiceLayerConnection, card_code: str, contact_code: int
-) -> Dict:
-    if not contact_code:
-        return {"nombre": "", "telefono": "", "email": ""}
+) -> tuple:
+    """
+    Trae el BP COMPLETO (sin $select, porque DiscountGroups no responde a $select)
+    y devuelve (contacto, descuento) en UNA sola llamada.
+
+    Antes esto eran dos cosas separadas (contacto por un lado, descuento por otro);
+    ahora ambos salen del mismo viaje al BusinessPartner.
+    """
+    contacto = {"nombre": "", "telefono": "", "email": ""}
+    descuento = 0.0
     try:
-        bp = conn.get(
-            f"BusinessPartners('{card_code}')", {"$select": "ContactEmployees"}
-        )
-        if bp and "ContactEmployees" in bp:
-            for contacto in bp["ContactEmployees"]:
-                if contacto.get("InternalCode") == contact_code:
-                    return {
-                        "nombre": contacto.get("Name", ""),
-                        "telefono": contacto.get("Phone1", "")
-                        or contacto.get("MobilePhone", ""),
-                        "email": contacto.get("E_Mail", ""),
-                    }
+        bp = conn.get(f"BusinessPartners('{card_code}')", {})
+        if bp:
+            # Descuento real desde DiscountGroups (fuente configurada en SAP)
+            descuento = calcular_descuento_bp(bp.get("DiscountGroups", []))
+
+            # Contacto principal (si aplica)
+            if contact_code and "ContactEmployees" in bp:
+                for c in bp["ContactEmployees"]:
+                    if c.get("InternalCode") == contact_code:
+                        contacto = {
+                            "nombre": c.get("Name", ""),
+                            "telefono": c.get("Phone1", "") or c.get("MobilePhone", ""),
+                            "email": c.get("E_Mail", ""),
+                        }
+                        break
     except:
         pass
-    return {"nombre": "", "telefono": "", "email": ""}
+    return contacto, descuento
 
 
 def obtener_mapeo_direcciones(
@@ -444,7 +475,6 @@ def obtener_documentos_cliente(
 def procesar_datos_cliente(
     conn: ServiceLayerConnection,
     cliente: Dict,
-    descuentos_cache: Dict,
     saldos_favor_cache: Dict = None,
 ) -> List[Dict]:
     """
@@ -452,19 +482,21 @@ def procesar_datos_cliente(
     uno por cada vendedor que tenga facturas en este cliente.
     """
     card_code = cliente.get("CardCode")
-    contacto = obtener_contacto_principal(conn, card_code, cliente.get("ContactPerson"))
+
+    # Contacto + descuento real (DiscountGroups) en UNA sola llamada al BP
+    contacto, descuento_porcent = obtener_contacto_y_descuento(
+        conn, card_code, cliente.get("ContactPerson")
+    )
 
     condicion_pago, plazo_dias = obtener_condicion_pago(
         conn, cliente.get("PayTermsGrpCode")
     )
 
-    # Descuento propio del cliente (desde JSON precalculado)
-    descuento_porcent = float(descuentos_cache.get(card_code, 0) or 0)
-    # Herencia padre→hijo: si la sucursal no tiene descuento propio, usa el del padre
+    # Herencia padre->hijo: si la sucursal no tiene descuento propio, hereda del padre
     if descuento_porcent == 0:
         father = cliente.get("FatherCard")
         if father:
-            descuento_porcent = float(descuentos_cache.get(father, 0) or 0)
+            descuento_porcent = obtener_descuento_cliente(conn, father)
 
     grupo_descuento = cliente.get("GroupCode", -1)
 
@@ -594,9 +626,6 @@ def ejecutar_reportes_gira(agente_id: str = None):
         print("\n📋 Obteniendo listado de Agentes...")
         vendedores_cache = obtener_vendedores(conn)
 
-        print("📋 Cargando descuentos precalculados (descuentos.json)...")
-        descuentos_cache = cargar_descuentos()
-
         print("📋 Obteniendo clientes con saldo...")
         clientes = obtener_clientes_con_saldo(
             conn, limite=20 if "--test" in sys.argv else None
@@ -623,7 +652,6 @@ def ejecutar_reportes_gira(agente_id: str = None):
                     procesar_datos_cliente,
                     conn,
                     cli,
-                    descuentos_cache,
                     saldos_favor_cache,
                 ): cli
                 for cli in clientes
