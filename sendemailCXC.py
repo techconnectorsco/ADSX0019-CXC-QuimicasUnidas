@@ -190,7 +190,7 @@ def get_email_html(
             .contact-box {{ background-color: #e3f2fd; padding: 25px; border-radius: 8px; margin-top: 30px; text-align: center; border: 1px solid #bbdefb; }}
             .contact-email {{ font-size: 20px; font-weight: bold; color: #475da4; margin: 8px 15px; display: inline-block; text-decoration: none; }}
             .footer {{ text-align: center; font-size: 12px; color: #666666; margin-top: 35px; padding-top: 20px; border-top: 1px solid #e0e0e0; }}
-            .firma-img {{ max-width: 350px; height: auto; margin-top: 15px; display: block; }}
+            .firma-img {{ max-width: 100px; height: auto; margin-top: 15px; display: block; }}
         </style>
     </head>
     <body>
@@ -240,7 +240,7 @@ def get_email_html(
 
                 <div>
                     Atentamente,<br>
-                    <img src="cid:firma_asistente" alt="Asistente Digital - Químicas Unidas" class="firma-img">
+                    <img src="cid:firma_asistente" alt="Asistente Digital - Químicas Unidas" width="400" style="width:400px; max-width:400px; height:auto; display:block; margin-top:15px;">
                 </div>
             </div>
 

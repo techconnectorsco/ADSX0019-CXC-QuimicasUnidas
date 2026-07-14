@@ -118,7 +118,7 @@ def obtener_clientes_con_saldo(
 
     params = {
         "$filter": filtro,
-        "$select": "CardCode,CardName,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,CreditLimit,ContactPerson,Address,Currency,FatherCard",
+        "$select": "CardCode,CardName,Phone1,Phone2,Cellular,CurrentAccountBalance,SalesPersonCode,U_ZGIRA,CreditLimit,ContactPerson,Address,Currency,FatherCard,PayTermsGrpCode",
     }
 
     if limite:
@@ -261,7 +261,7 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
         moneda = "CRC"
 
     saldo = total - pagado
-    if abs(saldo) < 0.01:
+    if abs(saldo) < 0.005:
         return None
 
     tipo_doc = str(doc.get("U_TDOC", "") or "").strip().upper()

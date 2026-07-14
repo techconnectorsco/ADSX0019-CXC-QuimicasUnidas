@@ -425,7 +425,7 @@ def procesar_documento(doc: Dict, tipo_origen: str) -> Optional[Dict]:
     saldo = total - pagado
 
     # Si saldo es 0, no incluir
-    if abs(saldo) < 0.01:
+    if abs(saldo) < 0.005:
         return None
 
     # Tipo de documento
