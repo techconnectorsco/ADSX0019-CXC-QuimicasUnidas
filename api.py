@@ -36,6 +36,7 @@ from fastapi import FastAPI
 from main import obtener_clientes_con_saldo
 from modules.database.conexion import ServiceLayerConnection
 from pydantic import BaseModel
+import agentes
 
 # ==========================================
 # INICIALIZACIÓN
@@ -123,6 +124,47 @@ def procesador_cola():
 threading.Thread(target=procesador_cola, daemon=True).start()
 
 
+class PeticionGira(BaseModel):
+    agente_codigo: str
+    solo_prueba: bool = False
+    correo_destino: Optional[str] = None
+
+
+cola_tareas_gira = queue.Queue()
+
+
+def procesador_cola_gira():
+    while True:
+        tarea = cola_tareas_gira.get()
+        job_id = tarea["job_id"]
+        agente_codigo = tarea["agente_codigo"]
+        solo_prueba = tarea["solo_prueba"]
+        correo_destino = tarea["correo_destino"]
+
+        print(f"\n[{job_id}] Iniciando gira manual del agente {agente_codigo}...")
+
+        try:
+            if solo_prueba:
+                agentes.MODO_PRUEBA = True
+                agentes.EMAIL_PRUEBA = correo_destino or "credito@qu.cr"
+                print(f"[{job_id}] MODO REVISIÓN: PDF enviado a {agentes.EMAIL_PRUEBA}")
+            else:
+                agentes.MODO_PRUEBA = False
+                print(f"[{job_id}] MODO REAL: Enviando al correo del agente en SAP")
+
+            agentes.ejecutar_reportes_gira(agente_id=agente_codigo)
+            print(f"[{job_id}] Gira finalizada con éxito.")
+
+        except Exception as e:
+            print(f"[{job_id}] Error en la gira: {str(e)}")
+
+        finally:
+            cola_tareas_gira.task_done()
+
+
+threading.Thread(target=procesador_cola_gira, daemon=True).start()
+
+
 # ==========================================
 # ENDPOINTS DE LA API
 # ==========================================
@@ -176,6 +218,39 @@ def encolar_rpa(peticion: PeticionCXC):
     return {
         "estado": "exito",
         "mensaje": f"Enviado correctamente para {alcance}. PDFs a: {destino_pdf}.",
+        "job_id": job_id,
+    }
+
+
+@app.post("/api/ejecutar-gira")
+def encolar_gira(peticion: PeticionGira):
+    if not peticion.agente_codigo:
+        return {"estado": "error", "mensaje": "Debe seleccionar un agente"}
+
+    if peticion.solo_prueba and not peticion.correo_destino:
+        return {
+            "estado": "error",
+            "mensaje": "Debe proporcionar un 'correo_destino' al activar el modo de revisión",
+        }
+
+    job_id = str(uuid.uuid4())[:8]
+
+    cola_tareas_gira.put(
+        {
+            "job_id": job_id,
+            "agente_codigo": peticion.agente_codigo,
+            "solo_prueba": peticion.solo_prueba,
+            "correo_destino": peticion.correo_destino,
+        }
+    )
+
+    destino = (
+        f"revisión ({peticion.correo_destino})" if peticion.solo_prueba else "el agente"
+    )
+
+    return {
+        "estado": "exito",
+        "mensaje": f"Gira del agente {peticion.agente_codigo} encolada. Destino: {destino}.",
         "job_id": job_id,
     }
 
