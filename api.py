@@ -250,7 +250,7 @@ def encolar_gira(peticion: PeticionGira):
 
     return {
         "estado": "exito",
-        "mensaje": f"Gira del agente {peticion.agente_codigo} encolada. Destino: {destino}.",
+        "mensaje": f"Gira del agente {peticion.agente_codigo} procesada con exito. Destino: {destino}.",
         "job_id": job_id,
     }
 
