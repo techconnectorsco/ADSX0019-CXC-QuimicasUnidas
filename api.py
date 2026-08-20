@@ -125,7 +125,7 @@ threading.Thread(target=procesador_cola, daemon=True).start()
 
 
 class PeticionGira(BaseModel):
-    agente_codigo: str
+    agente_codigo: Optional[str] = None  # None = todos los agentes con correo
     solo_prueba: bool = False
     correo_destino: Optional[str] = None
 
@@ -141,7 +141,10 @@ def procesador_cola_gira():
         solo_prueba = tarea["solo_prueba"]
         correo_destino = tarea["correo_destino"]
 
-        print(f"\n[{job_id}] Iniciando gira manual del agente {agente_codigo}...")
+        if agente_codigo:
+            print(f"\n[{job_id}] Iniciando gira manual del agente {agente_codigo}...")
+        else:
+            print(f"\n[{job_id}] Iniciando gira manual para TODOS los agentes...")
 
         try:
             if solo_prueba:
@@ -224,9 +227,6 @@ def encolar_rpa(peticion: PeticionCXC):
 
 @app.post("/api/ejecutar-gira")
 def encolar_gira(peticion: PeticionGira):
-    if not peticion.agente_codigo:
-        return {"estado": "error", "mensaje": "Debe seleccionar un agente"}
-
     if peticion.solo_prueba and not peticion.correo_destino:
         return {
             "estado": "error",
@@ -245,12 +245,19 @@ def encolar_gira(peticion: PeticionGira):
     )
 
     destino = (
-        f"revisión ({peticion.correo_destino})" if peticion.solo_prueba else "el agente"
+        f"revisión ({peticion.correo_destino})"
+        if peticion.solo_prueba
+        else "el/los agente(s)"
+    )
+    alcance = (
+        f"el agente {peticion.agente_codigo}"
+        if peticion.agente_codigo
+        else "TODOS los agentes"
     )
 
     return {
         "estado": "exito",
-        "mensaje": f"Gira del agente {peticion.agente_codigo} procesada con exito. Destino: {destino}.",
+        "mensaje": f"Gira procesada para {alcance}. Destino: {destino}.",
         "job_id": job_id,
     }
 
