@@ -1,0 +1,85 @@
+==============================================================================
+VERIFICACION - LAS SUCURSALES TIENEN ZONA (U_ZGIRA)?
+Quimicas Unidas / ADSX0019
+Fecha: 19/09/2026 12:59:19
+
+Script de SOLO LECTURA. Unicamente GET (mas Login/Logout).
+No escribe, no edita, no elimina, no envia.
+==============================================================================
+
+Conectando a SAP PRODUCCION (solo lectura)...
+
+==============================================================================
+PASO 1 - Universo
+==============================================================================
+
+   Zonas en U_GIRAS: 19
+   Agentes con correo: 3
+   Sucursales de esos agentes (saldo cero): 102
+
+==============================================================================
+PASO 2 - Cuales sucursales cargan documentos abiertos
+==============================================================================
+
+
+   Sucursales con al menos un documento abierto: 50
+   Sucursales sin documentos (no aportan al PDF): 52
+
+==============================================================================
+PASO 3 - Tienen zona asignada?
+==============================================================================
+
+   De las 102 sucursales:
+      Con U_ZGIRA asignada : 102
+      Sin U_ZGIRA          : 0
+
+   De las 50 que SI cargan documentos (las que importan):
+      Con U_ZGIRA asignada : 50
+      Sin U_ZGIRA          : 0
+
+==============================================================================
+PASO 4 - Las sucursales sin zona pueden heredarla del padre?
+==============================================================================
+
+   No hay sucursales sin zona. La herencia no hace falta.
+
+==============================================================================
+PASO 5 - Forma final del arbol (con sucursales incluidas)
+==============================================================================
+
+   Contando clientes con saldo + sucursales, con herencia de zona:
+
+   Siviany González (ID 6): 59 clientes, 4 zonas
+      Zona 26           MESETA 2 SHIND CERCA                       30 clientes
+      Zona 3            SAN CARLOS SHINDAIWA                       17 clientes
+      Zona 4            ZONA NORTE-ECHO                            11 clientes
+      Zona 9            AGROTECH                                   1 clientes
+
+   Berny Marín Chavez (ID 7): 72 clientes, 6 zonas
+      Zona 1            GUANACASTE 1 SHINDAIWA                     40 clientes
+      Zona 5            COLONO AGROP-ALM COLONO BM                 13 clientes
+      Zona 7            LIMON SHINDAIWA                            12 clientes
+      Zona 15           INACTIVAS                                  5 clientes
+      Zona 06           (no resuelto)                              1 clientes
+      Zona 9            AGROTECH                                   1 clientes
+
+   José Chacón (ID 9): 62 clientes, 8 zonas
+      Zona 12           MESETA ECHO 1 LARGO                        25 clientes
+      Zona 6            SUR SHINDAIWA                              25 clientes
+      Zona 5            COLONO AGROP-ALM COLONO BM                 4 clientes
+      Zona 15           INACTIVAS                                  4 clientes
+      Zona 9            AGROTECH                                   1 clientes
+      Zona 3            SAN CARLOS SHINDAIWA                       1 clientes
+      Zona 4            ZONA NORTE-ECHO                            1 clientes
+      Zona 24           COLONOS-ZONA NORTE BM                      1 clientes
+
+==============================================================================
+CONCLUSION
+==============================================================================
+
+   Todos los clientes del arbol quedan dentro de una zona.
+   -> El bucket 'Sin zona asignada' de la interfaz NO hace falta.
+   -> Mantener el campo sinZona en el tipo por seguridad, pero sin
+      disenar interfaz alrededor de el.
+
+   Duracion: 14.7 segundos

@@ -1,0 +1,76 @@
+==============================================================================
+DESGLOSE C0042 - por que el PDF trae 44 y no 69
+Quimicas Unidas / ADSX0019
+Fecha: 27/09/2026 21:32:25
+
+Script de SOLO LECTURA. Unicamente GET (mas Login/Logout).
+No escribe, no edita, no elimina, no envia.
+==============================================================================
+
+Conectando a SAP PRODUCCION (solo lectura)...
+
+==============================================================================
+PASO 1 - Ruteo de direcciones de entrega (BPAddresses.U_CODV)
+==============================================================================
+
+   Direcciones de entrega con vendedor asignado: 62
+
+   Vendedor 6: 20 direcciones
+      AGUAZARCAS, BIJAGUA, CEDRAL, CHACHAGUA, FORTUNA, GUATUSO, KATIRA, MUELLE, NUEVOARENAL, PAVON, PITAL, PITAL CENTRO, SANCARLOS, SANTACLARA, SANTAROSA, STARITA, TANQUE, TILARAN (SAN CARLOS), UPALA, VENECIA
+
+   Vendedor 7: 26 direcciones   <-- el agente de la prueba
+      BAGACES, BATAAN, CARIARI, CAÑAS, EL CRUCE-CARIARI, FLAMINGO, GUACIMO, GUAPILES, GUAYABO, HONECREEK, HUACAS, JIMENEZ, LAVIRGEN, LIBERIA, LIMON, NICOYA, NICOYA CENTRO, POCORA, RIO JIMENEZ, RIOFRIO, SANTACRUZ, SARAPIQUI, SIQUIRRES, TAMARINDO, TICABAN, VILLAREAL
+
+   Vendedor 9: 16 direcciones
+      BUENOSAIRES, CARTAGO, CARTAGOCENTRO, CERVANTES, CIUDADNEILLY, COOPEAGROPAL, LASUIZA, LAUREL, OJOCHAL, OREAMUNO, PARAISO, PEREZ ZELEDON, PUERTOJIMENEZ, RIOCLARO, SANVITO, TURRIALBA
+
+==============================================================================
+PASO 2 - Documentos abiertos hoy (mismo filtro que la gira)
+==============================================================================
+
+   Facturas con estado abierto en SAP : 77
+   Notas de credito abiertas (>= 2022): 0
+
+==============================================================================
+PASO 3 - Los dos filtros de la gira, uno por uno
+==============================================================================
+
+   SalesPersonCode de la ficha del cliente: 7
+   (es el vendedor por defecto cuando una direccion no tiene U_CODV)
+
+   FILTRO 1 - saldo despreciable, abs(saldo) < 0.005:
+      facturas descartadas         : 0
+      notas de credito descartadas : 0
+      quedan con saldo real        : 77
+
+   FILTRO 2 - ruteo al vendedor 7:
+      del agente 7, van al PDF : 45
+      de otros vendedores, omitidos : 32
+
+      Reparto de los omitidos:
+         vendedor 9: 22 docs   (BUENOSAIRES, CARTAGO, CERVANTES, CIUDADNEILLY, LASUIZA, LAUREL, OREAMUNO, PEREZ ZELEDON, PUERTOJIMENEZ, SANVITO)
+         vendedor 6: 10 docs   (AGUAZARCAS, BIJAGUA, CEDRAL, PAVON, PITAL, SANCARLOS, STARITA)
+
+==============================================================================
+PASO 4 - Cuadre de la diferencia
+==============================================================================
+
+   Facturas con saldo el 19/09, todos los vendedores : 69
+   Facturas con saldo hoy, todos los vendedores      : 77
+   -> pagadas o cerradas en 8 dias                   : -8
+
+   De las de hoy, ruteadas al vendedor 7           : 45
+   Filas de documento contadas en el PDF del 27/09   : 44
+
+   [REVISAR] El calculo da 45 y el PDF tiene 44.
+        Diferencia sin explicar: 1 documentos.
+        Nota: el PDF puede incluir lineas de saldo a favor (tipo PR),
+        que este script no consulta. Revisar si la diferencia va por ahi.
+
+   Saldo de los documentos del vendedor 7:
+      CRC       286,223.02
+      USD        11,484.52
+   Encabezado del PDF generado:  CRC 286,223.02  |  USD 11,484.52
+   (los montos del PDF no incluyen saldos a favor tipo PR)
+
+Duracion: 10s

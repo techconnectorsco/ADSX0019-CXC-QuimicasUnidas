@@ -275,5 +275,156 @@ def listar_clientes():
         return {"estado": "error", "mensaje": str(e)}
 
 
+# ==========================================
+# GIRA SELECTIVA POR ZONA
+# ==========================================
+# Bloque AGREGADO por el módulo "Giras por Zona" (ver PLAN_GIRAS_POR_ZONA.md,
+# sección 7.2). Cola propia, worker propio y endpoints propios: no toca
+# cola_tareas, cola_tareas_gira ni ninguno de los endpoints existentes.
+
+
+class PeticionGiraZona(BaseModel):
+    agente_codigo: str
+    card_codes: List[str]
+    solo_prueba: bool = False
+    correo_destino: Optional[str] = None
+    zona_nombre: Optional[str] = None
+    dry_run: bool = False
+
+
+cola_tareas_gira_zona = queue.Queue()
+
+# Estado de los trabajos en memoria, para que la interfaz pueda consultarlo.
+# Se pierde al reiniciar PM2 — es intencional, no hace falta persistirlo.
+estados_gira_zona = {}
+
+
+def procesador_cola_gira_zona():
+    while True:
+        tarea = cola_tareas_gira_zona.get()
+        job_id = tarea["job_id"]
+
+        estados_gira_zona[job_id] = {"estado": "procesando", "resultado": None}
+        print(
+            f"\n[{job_id}] Gira selectiva: agente {tarea['agente_codigo']}, "
+            f"{len(tarea['card_codes'])} clientes..."
+        )
+
+        try:
+            # modo_prueba y email_prueba van como ARGUMENTOS, nunca escribiendo
+            # agentes.MODO_PRUEBA: dos colas tocando ese global producen una
+            # race condition con la gira completa (sección 6.1 del plan).
+            resultado = agentes.ejecutar_gira_selectiva(
+                agente_id=tarea["agente_codigo"],
+                card_codes=tarea["card_codes"],
+                modo_prueba=tarea["solo_prueba"],
+                email_prueba=tarea["correo_destino"] or "credito@qu.cr",
+                zona_nombre=tarea["zona_nombre"],
+                dry_run=tarea["dry_run"],
+            )
+            estados_gira_zona[job_id] = {
+                "estado": "terminado" if resultado.get("ok") else "con_avisos",
+                "resultado": resultado,
+            }
+            print(f"[{job_id}] {resultado.get('mensaje')}")
+
+        except Exception as e:
+            estados_gira_zona[job_id] = {
+                "estado": "error",
+                "resultado": {"ok": False, "mensaje": str(e)},
+            }
+            print(f"[{job_id}] Error en gira selectiva: {str(e)}")
+
+        finally:
+            cola_tareas_gira_zona.task_done()
+
+
+threading.Thread(target=procesador_cola_gira_zona, daemon=True).start()
+
+
+@app.post("/api/ejecutar-gira-zona")
+def encolar_gira_zona(peticion: PeticionGiraZona):
+    # Validar ANTES de encolar: un error dentro del worker no llega al usuario,
+    # solo queda en los logs de PM2.
+    if not peticion.agente_codigo or not str(peticion.agente_codigo).strip():
+        return {"estado": "error", "mensaje": "Falta agente_codigo"}
+
+    try:
+        int(peticion.agente_codigo)
+    except (TypeError, ValueError):
+        return {
+            "estado": "error",
+            "mensaje": f"agente_codigo debe ser numérico, llegó: {peticion.agente_codigo!r}",
+        }
+
+    if not peticion.card_codes:
+        return {"estado": "error", "mensaje": "Seleccione al menos un cliente"}
+
+    if peticion.solo_prueba and not peticion.correo_destino:
+        return {
+            "estado": "error",
+            "mensaje": "Debe proporcionar un 'correo_destino' en modo revisión",
+        }
+
+    job_id = str(uuid.uuid4())[:8]
+    estados_gira_zona[job_id] = {"estado": "en_cola", "resultado": None}
+
+    cola_tareas_gira_zona.put(
+        {
+            "job_id": job_id,
+            "agente_codigo": str(peticion.agente_codigo).strip(),
+            "card_codes": peticion.card_codes,
+            "solo_prueba": peticion.solo_prueba,
+            "correo_destino": peticion.correo_destino,
+            "zona_nombre": peticion.zona_nombre,
+            "dry_run": peticion.dry_run,
+        }
+    )
+
+    # Si el interruptor de seguridad del módulo está puesto, avisarlo en la
+    # respuesta: si no, la interfaz diría "gira encolada" y nunca llegaría nada.
+    aviso = ""
+    if getattr(agentes, "GIRA_ZONA_FORZAR_DRY_RUN", False):
+        aviso = " [MODO ENSAYO: se genera el PDF pero no se envía ni se sube]"
+
+    return {
+        "estado": "exito",
+        "mensaje": (
+            f"Gira selectiva encolada: agente {peticion.agente_codigo}, "
+            f"{len(peticion.card_codes)} clientes.{aviso}"
+        ),
+        "job_id": job_id,
+        "modo_ensayo": bool(getattr(agentes, "GIRA_ZONA_FORZAR_DRY_RUN", False)),
+    }
+
+
+@app.get("/api/estado-gira-zona/{job_id}")
+def estado_gira_zona(job_id: str):
+    estado = estados_gira_zona.get(job_id)
+    if not estado:
+        return {"estado": "desconocido", "mensaje": "job_id no encontrado"}
+    return estado
+
+
+@app.get("/api/config-gira-zona")
+def config_gira_zona():
+    """
+    Diagnóstico de solo lectura: en qué modo está el módulo antes de disparar
+    nada. Útil para confirmar desde la web (o con un curl) que el interruptor
+    de ensayo sigue puesto sin tener que entrar al VPS a leer el archivo.
+    """
+    return {
+        "forzar_dry_run": bool(getattr(agentes, "GIRA_ZONA_FORZAR_DRY_RUN", False)),
+        "cc_activo": bool(getattr(agentes, "GIRA_ZONA_CC_ACTIVO", False)),
+        "subir_sharepoint": bool(
+            getattr(agentes, "GIRA_ZONA_SUBIR_SHAREPOINT", False)
+        ),
+        "solo_revision": bool(getattr(agentes, "GIRA_ZONA_SOLO_REVISION", False)),
+        "max_workers": getattr(agentes, "GIRA_ZONA_MAX_WORKERS", None),
+        "output_dir": getattr(agentes, "GIRA_ZONA_OUTPUT_DIR", None),
+        "tareas_en_cola": cola_tareas_gira_zona.qsize(),
+    }
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8050)

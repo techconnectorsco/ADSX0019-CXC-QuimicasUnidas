@@ -1,0 +1,184 @@
+==============================================================================
+VERIFICACION PREVIA - MODULO GIRAS POR ZONA
+Quimicas Unidas / ADSX0019
+Fecha: 19/09/2026 12:44:15
+
+Script de SOLO LECTURA. Unicamente GET (mas Login/Logout, que es como
+autentica el Service Layer). No escribe, no edita, no elimina, no envia.
+==============================================================================
+
+Conectando a SAP PRODUCCION (solo lectura)...
+
+==============================================================================
+CHECK 1 - Tabla de zonas (UDT @GIRAS)
+==============================================================================
+
+   Probando entidad 'U_GIRAS'...
+   [OK] Responde. Registros en la primera pagina: 19
+   Campos disponibles: ['Code', 'Name']
+   Total de zonas leidas: 19
+
+   RESULTADO: la UDT responde como 'U_GIRAS'.
+   -> obtenerZonas() del plan es viable tal cual.
+
+   CODE     | NOMBRE
+   ------------------------------------------------------------
+   1        | GUANACASTE 1 SHINDAIWA
+   2        | COLONOS SUR
+   3        | SAN CARLOS SHINDAIWA
+   4        | ZONA NORTE-ECHO
+   5        | COLONO AGROP-ALM COLONO BM
+   6        | SUR SHINDAIWA
+   7        | LIMON SHINDAIWA
+   8        | MESETA CENTRAL 1 SHINDAIWA
+   9        | AGROTECH
+   10       | ENTIDADES PUBLICAS-GOBIERNO
+   12       | MESETA ECHO 1 LARGO
+   13       | SUR 1 ECHO SANTOS (02,03)
+   15       | INACTIVAS
+   20       | EMPLEADOS
+   21       | CUENTAS CON PROBLEMAS (CASOS ABOGADO)
+   23       | GIRA ESPECIAL MESETA  SHIND/ECHO
+   24       | COLONOS-ZONA NORTE BM
+   25       | PARTES RELACIONADAS
+   26       | MESETA 2 SHIND CERCA
+
+==============================================================================
+CHECK 2 - Agentes con correo en SAP
+==============================================================================
+
+   Vendedores en SAP: 17
+   Con correo valido (los que el sistema considera activos): 3
+
+   ID    | NOMBRE                           | CORREO
+   ----------------------------------------------------------------------
+   6     | Siviany González                 | sgonzalez@qu.cr
+   7     | Berny Marín Chavez               | bmarin@qu.cr
+   9     | José Chacón                      | jchacon@qu.cr
+
+==============================================================================
+CHECK 3 - Arbol Agente -> Zona -> Clientes
+==============================================================================
+
+   Ejecutando la consulta exacta que propone el plan:
+   BusinessPartners?$filter=CardType eq 'cCustomer' and CurrentAccountBalance ne 0
+
+   Clientes con saldo distinto de cero: 181
+   Clientes sin U_ZGIRA asignada: 62
+   Clientes cuyo vendedor NO tiene correo (no visibles en el arbol): 90
+
+   Siviany González (ID 6): 35 clientes, 4 zonas
+      Zona 26           MESETA 2 SHIND CERCA                       18 clientes
+      Zona 4            ZONA NORTE-ECHO                            10 clientes
+      Zona 3            SAN CARLOS SHINDAIWA                       6 clientes
+      Zona 9            AGROTECH                                   1 clientes
+
+   Berny Marín Chavez (ID 7): 32 clientes, 3 zonas
+      Zona 1            GUANACASTE 1 SHINDAIWA                     17 clientes
+      Zona 7            LIMON SHINDAIWA                            12 clientes
+      Zona 5            COLONO AGROP-ALM COLONO BM                 3 clientes
+
+   José Chacón (ID 9): 24 clientes, 3 zonas
+      Zona 12           MESETA ECHO 1 LARGO                        15 clientes
+      Zona 6            SUR SHINDAIWA                              8 clientes
+      Zona 9            AGROTECH                                   1 clientes
+
+==============================================================================
+CHECK 4 - Clientes con FatherCard que el arbol dejaria fuera
+==============================================================================
+
+   La gira completa usa: saldo != 0  OR  FatherCard != null
+   El arbol del plan usa: saldo != 0
+   Diferencia = sucursales con saldo en cero.
+
+   Sucursales con saldo cero: 238
+   De ellas, asignadas a un agente con correo: 102
+
+   CODIGO       | NOMBRE                                 | PADRE      | VEND
+   --------------------------------------------------------------------------
+   C0010        | AGRO SERVICIOS EL SALITRE S.A.         | C0009      | 6
+   C0011        | AGRO SERVICIOS EL SALITRE S.A.         | C0009      | 6
+   C0029        | AGROVETERINARIA LA YUNTA S.A.          | C0028      | 6
+   C0030        | AGROVETERINARIA LA YUNTA S.A.          | C0028      | 6
+   C0037        | ALMACEN COOPEVEGA S.A.                 | C0036      | 9
+   C0038        | ALMACEN COOPEVEGA S.A.                 | C0036      | 9
+   C0041        | ALMACENES EL COLONO S.A.               | C0040      | 7
+   C0042        | ALMACENES EL COLONO S.A.               | C0040      | 7
+   C0043        | ALMACENES EL COLONO S.A.               | C0040      | 7
+   C0044        | ALMACENES EL COLONO S.A.               | C0040      | 7
+   C0060        | CAMARA DE GANADEROS DE SANTA CRUZ      | C0059      | 7
+   C0061        | CAMARA DE GANADEROS DE SANTA CRUZ      | C0059      | 7
+   C0066        | EL COLONO AGROPECUARIO S.A.            | C0161      | 9
+   C0073        | CENTRO AGRIC. CANT. DE ESPARZA         | C0072      | 7
+   C0074        | CENTRO AGRIC. CANT. DE ESPARZA         | C0072      | 7
+   C0076        | CENTRO AGRIC.CANTONAL DE PUNTARENAS    | C0075      | 7
+   C0077        | CENTRO AGRIC.CANTONAL DE PUNTARENAS    | C0075      | 7
+   C0080        | CENTRO AGRICOLA CANTONAL DE COTO BRUS  | C0079      | 9
+   C0081        | CENTRO AGRICOLA CANTONAL DE COTO BRUS  | C0079      | 9
+   C0084        | CENTRO AGRICOLA CANTONAL DE SARCHI     | C0083      | 6
+   C0085        | CENTRO AGRICOLA CANTONAL DE SARCHI     | C0083      | 6
+   C0087        | CENTRO DE SERVICIO ESCALANTE GALLARDO  | C0086      | 9
+   C0088        | CENTRO DE SERVICIO ESCALANTE GALLARDO  | C0086      | 9
+   C0090        | COMPAÑIA BANACOLONO S.A.               | C0089      | 7
+   C0091        | COMPAÑIA BANACOLONO S.A.               | C0089      | 7
+   C0109        | COOPE ATENAS R.L.                      | C0108      | 6
+   C0110        | COOPE ATENAS R.L.                      | C0108      | 6
+   C0115        | COOPE PALMARES                         | C0114      | 6
+   C0116        | COOPE PALMARES                         | C0114      | 6
+   C0118        | COOPESABALITO R.L.                     | C0117      | 9
+   C0119        | COOPESABALITO R.L.                     | C0117      | 9
+   C0121        | COOPE TARRAZU R.L                      | C0120      | 9
+   C0122        | COOPE TARRAZU R.L                      | C0120      | 9
+   C0128        | COOPERATIVA DE CAFICULTORES DE DOTA R  | C0127      | 9
+   C0129        | COOPERATIVA DE CAFICULTORES DE DOTA R  | C0127      | 9
+   C0131        | COOPERATIVA NACIONAL DEPRODUCTORES DE  | C0130      | 7
+   C0139        | CORPORACION COMERCIAL EL LAGAR S.A.    | C0138      | 9
+   C0140        | CORPORACION COMERCIAL EL LAGAR S.A.    | C0138      | 9
+   C0144        | DANIEL GERARDO CORDOBA BARRIENTOS      | C0143      | 6
+   C0145        | DANIEL GERARDO CORDOBA BARRIENTOS      | C0143      | 6
+   ... y 62 mas.
+
+   RESULTADO: diferencia relevante. Decidir con Tania si el arbol
+   debe incluir sucursales sin saldo propio.
+
+==============================================================================
+CHECK 5 - Vendedor del cliente vs vendedor de la direccion (U_CODV)
+==============================================================================
+
+   El arbol agrupa por SalesPersonCode del CLIENTE.
+   agentes.py rutea cada documento por BPAddresses.U_CODV de su ShipTo.
+   Si difieren, Tania puede seleccionar un cliente y recibir un PDF vacio.
+
+   Revisando direcciones de 91 clientes (un GET por cliente)...
+
+   Clientes revisados: 91
+   Con al menos una direccion que define vendedor (U_CODV): 89
+   Con direcciones apuntando a OTRO vendedor: 1
+
+   CODIGO       | NOMBRE                             | AGENTE  | OTROS VENDEDORES
+   ----------------------------------------------------------------------------
+   C0476        | SUKAMPO S.R.L.                     | 9       | [11]
+
+   RESULTADO: 1 clientes (1.1%) pueden generar un PDF
+   con menos clientes de los seleccionados, o vacio.
+   -> ejecutar_gira_selectiva DEBE devolver el conteo real procesado
+      y la interfaz mostrarlo.
+
+==============================================================================
+CHECK 6 - Base de datos de pruebas
+==============================================================================
+
+   Intentando Login contra SAP_COMPANY_DB_TEST...
+   BD configurada: ZSBO_CR_QUIMICAS_TEST
+   [--] No se pudo entrar. Toda prueba sera contra PRODUCCION.
+
+==============================================================================
+CONCLUSIONES PARA LA IMPLEMENTACION
+==============================================================================
+
+   1. UDT de zonas: ACCESIBLE (19 zonas)
+   2. Desajuste de vendedor: 1 de 91 clientes
+   3. Sucursales fuera del arbol: 102
+   4. BD de pruebas: NO DISPONIBLE
+
+   Duracion: 33.2 segundos

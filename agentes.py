@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 import time
 from collections import Counter
+from decouple import config
 from supabase_manager import verificar_estado_rpa, finalizar_y_reportar, ID_RPA_QU_GIRAS
 from global_status_giras import status_global_giras
 
@@ -865,6 +866,610 @@ def ejecutar_reportes_gira(agente_id: str = None):
 
     finally:
         conn.logout()
+
+
+# =============================================================================
+# GIRA SELECTIVA (por zona / clientes puntuales)
+# =============================================================================
+# Bloque AGREGADO por el módulo "Giras por Zona" (ver PLAN_GIRAS_POR_ZONA.md,
+# secciones 6 y 7.1). Todo lo que está por encima de esta línea queda intacto:
+# estas funciones solo LLAMAN a las existentes, no cambian ninguna firma ni
+# ningún comportamiento de ejecutar_reportes_gira().
+
+import re  # solo lo usa _nombre_archivo_gira_zona()
+
+# -----------------------------------------------------------------------------
+# Interruptores de este módulo
+# -----------------------------------------------------------------------------
+#
+# Los tres frenos salen del .env, no de una edición al archivo. Antes había que
+# editar agentes.py en el VPS para bajar el dry run, y eso dejaba el repo del VPS
+# con una modificación local que el siguiente `git pull` iba a pelear. Así el
+# código queda idéntico en las dos máquinas y solo cambia el .env.
+#
+# Todos los defaults son el lado seguro: sin variable, el módulo frena.
+
+
+def _interruptor_env(nombre: str, por_defecto: bool) -> bool:
+    """
+    Lee un interruptor del .env sin poder tumbar la API.
+
+    El `cast=bool` de decouple usa strtobool, que revienta con un valor que no
+    reconoce ("Falso", "Si", un espacio de más). Sin este try, un dedazo en el
+    .env impediría que arranque api.py y se caería también la gira de los
+    martes, que no tiene nada que ver con este módulo. Ante un valor inválido se
+    usa el default, que siempre es el lado seguro, y se avisa en consola.
+    """
+    try:
+        return bool(config(nombre, default=por_defecto, cast=bool))
+    except Exception as e:
+        # Sin emoji y sin acentos A PROPOSITO: esto corre en tiempo de import,
+        # antes de que api.py reconfigure stdout a utf-8. Con un emoji, la consola
+        # cp1252 de Windows lanza UnicodeEncodeError y la red de seguridad tumba
+        # el import que venia a proteger. Ya paso una vez.
+        print(
+            f"ADVERTENCIA: {nombre} tiene un valor invalido en .env ({e}). "
+            f"Se usa el default seguro: {por_defecto}"
+        )
+        return por_defecto
+
+
+# 🚦 INTERRUPTOR DE SEGURIDAD DE LA ETAPA DE PRUEBAS.
+# Con True, ejecutar_gira_selectiva() genera el PDF y se detiene: NO sube a
+# SharePoint y NO envía correo, sin importar lo que pida quien la llame.
+# Está para que un POST accidental al endpoint no dispare un envío real
+# mientras el módulo está a medio probar.
+#
+# En el VPS hay que poner GIRA_ZONA_DRY_RUN=False en el .env: con el freno puesto
+# el módulo genera el PDF y no le llega a nadie.
+GIRA_ZONA_FORZAR_DRY_RUN = _interruptor_env("GIRA_ZONA_DRY_RUN", True)
+
+# Copia a gerencia SOLO para la gira selectiva.
+# Es una constante propia y NO la de la corrida de los martes a propósito:
+# apagarla para probar no puede afectar a ejecutar_reportes_gira(), que sigue
+# usando CORREOS_CC directamente (ver sección 4 del plan).
+GIRA_ZONA_CC_ACTIVO = True
+
+# Red de seguridad para la ventana de pruebas de envio, cuando
+# GIRA_ZONA_FORZAR_DRY_RUN esta en False. Con True, una gira en modo REAL (directo
+# al correo del agente, con copia a CORREOS_CC) se bloquea despues de generar el
+# PDF: solo pasa el modo revision, que va a un correo puntual y sin copias.
+#
+# Existe porque bajar el dry run deja un solo clic entre una prueba y un envio a
+# los 5 correos de gerencia: basta equivocarse en el desplegable "Metodo" del
+# panel. Como los demas interruptores del modulo, solo puede IMPEDIR.
+#
+# EN PRODUCCION TIENE QUE QUEDAR EN False: con True, Tania no puede mandarle la
+# gira al agente, que es justamente para lo que sirve el modulo. Por eso el
+# default es False y se sube a True solo durante una ventana de pruebas.
+GIRA_ZONA_SOLO_REVISION = _interruptor_env("GIRA_ZONA_SOLO_REVISION", False)
+
+# Subida a SharePoint SOLO de la gira selectiva. Es un interruptor aparte de
+# GIRA_ZONA_FORZAR_DRY_RUN porque son dos cosas distintas: se puede querer probar
+# un envio de correo real sin dejar un PDF de prueba en la carpeta de produccion.
+# Mismo criterio que los otros frenos del modulo: solo puede IMPEDIR. Con False no
+# se sube nunca; con True se sigue respetando el dry run, que frena todo antes.
+GIRA_ZONA_SUBIR_SHAREPOINT = _interruptor_env("GIRA_ZONA_SUBIR_SHAREPOINT", True)
+
+# Hilos para procesar los clientes seleccionados. Mismo criterio que la corrida
+# completa, que usa ThreadPoolExecutor(max_workers=12) sobre la misma conexión.
+GIRA_ZONA_MAX_WORKERS = 12
+
+# Carpeta local separada: el nombre del PDF de la gira completa no lleva hora,
+# así que compartir carpeta haría que una gira pisara a la otra el mismo día.
+GIRA_ZONA_OUTPUT_DIR = "data/reportes_gira_zona"
+
+
+def obtener_clientes_por_codigos(
+    conn: ServiceLayerConnection, card_codes: List[str], lote: int = 15
+) -> List[Dict]:
+    """
+    Trae los clientes indicados con EXACTAMENTE el mismo $select que
+    obtener_clientes_con_saldo(), para que procesar_datos_cliente() reciba la
+    misma forma de dato y el PDF salga idéntico al de la gira completa.
+
+    Ojo con el $select: si acá se agregara GroupCode, el PDF de la gira por zona
+    mostraría un grupo real mientras el de la gira completa sigue mostrando -1,
+    y los dos reportes dejarían de coincidir (sección 6.3 del plan).
+
+    Usa lotes con OR en vez de un GET por cliente: menos peticiones y devuelve
+    la misma estructura que la corrida normal.
+    """
+    campos = (
+        "CardCode,CardName,Phone1,Phone2,Cellular,CurrentAccountBalance,"
+        "SalesPersonCode,U_ZGIRA,CreditLimit,ContactPerson,Address,Currency,"
+        "FatherCard,PayTermsGrpCode"
+    )
+
+    encontrados: List[Dict] = []
+    codigos = [c for c in card_codes if c]
+
+    for i in range(0, len(codigos), lote):
+        bloque = codigos[i : i + lote]
+        filtro_or = " or ".join([f"CardCode eq '{c}'" for c in bloque])
+        encontrados.extend(
+            obtener_todos_paginado(
+                conn,
+                "BusinessPartners",
+                {"$filter": f"({filtro_or})", "$select": campos},
+                "CardCode",
+            )
+        )
+
+    return encontrados
+
+
+def _nombre_archivo_gira_zona(
+    pdf_path: str,
+    codigo_agente: str,
+    nombre_agente: str,
+    zona_nombre: str = None,
+) -> str:
+    """
+    Renombra el PDF para que no colisione con el de la gira completa.
+
+    Gira completa:  GIRA_{codigo}_{nombre}_{YYYYMMDD}.pdf
+    Gira por zona:  GIRA_{codigo}_{nombre}_{ZONA}_{YYYYMMDD_HHMM}.pdf
+
+    Sin esto, en SharePoint el PDF parcial sobrescribe el reporte oficial del día
+    (mismo nombre, misma carpeta). La hora va además de la zona porque dos giras
+    de la misma zona el mismo día también se pisarían entre sí.
+
+    Decisión de Irving (sección 15.1 del plan): mismo SharePoint, misma carpeta,
+    nombre distinto. Por eso NO se toca sharepoint_qu.py.
+    """
+    carpeta = os.path.dirname(pdf_path)
+
+    zona = zona_nombre or "SELECCION"
+    # Caracteres que SharePoint no acepta en un nombre de archivo
+    zona = re.sub(r'[\\/:*?"<>|,]', "", str(zona)).strip().replace(" ", "_")[:28]
+    if not zona:
+        zona = "SELECCION"
+
+    agente = str(nombre_agente).replace(" ", "_")[:20]
+    sello = datetime.now().strftime("%Y%m%d_%H%M")
+
+    nuevo = os.path.join(carpeta, f"GIRA_{codigo_agente}_{agente}_{zona}_{sello}.pdf")
+
+    try:
+        os.replace(pdf_path, nuevo)
+        return nuevo
+    except OSError as e:
+        # Si el renombrado falla es preferible seguir con el nombre original
+        # que abortar la gira: el riesgo es solo de colisión en SharePoint.
+        print(f"   ⚠️ No se pudo renombrar el PDF ({e}). Se usa: {pdf_path}")
+        return pdf_path
+
+
+# Cuanto texto entra en la banda azul del encabezado del PDF. La banda se dibuja
+# con cell() en agentepdf.py:122, que NO parte la linea: lo que no entra no baja
+# de renglon, se sale de la pagina. Con 1008 pt de ancho y Arial Bold 12 entran
+# unos 125 caracteres contando " AGENTE: <nombre> | ZONAS: ".
+GIRA_ZONA_MAX_CHARS_ZONAS = 85
+
+
+def _encabezado_zonas_calculado(zonas_por_cliente: set) -> str:
+    """
+    Texto del "ZONAS:" del PDF cuando el usuario NO eligió una zona, es decir
+    cuando la selección es mixta y hay que deducirla de los documentos.
+
+    Hace dos cosas que el cálculo crudo no hacía:
+
+    1. Deduplica destino por destino. El `zona_gira` de cada cliente ya es una
+       lista de destinos unida por comas (procesar_datos_cliente), así que un
+       set de esos strings deja repetidos: en la prueba del 28/09 con 43
+       clientes salieron 82 entradas para 49 destinos reales, GUAPILES cuatro
+       veces.
+    2. Recorta. Esas 82 entradas eran 833 caracteres en una sola línea: se veía
+       el primer 18% y el resto se salía de la página, cortado a media palabra.
+
+    Cuando no cabe se pone el conteo y se manda al detalle, que igual está en la
+    columna "Destino" de cada fila del reporte.
+
+    Solo lo usa la gira selectiva. La corrida de los martes sigue armando su
+    encabezado como siempre (mismo defecto, pero es código existente que no se
+    toca sin autorización).
+    """
+    destinos = sorted(
+        {
+            parte.strip()
+            for zona in zonas_por_cliente
+            for parte in str(zona).split(",")
+            if parte.strip()
+        }
+    )
+
+    if not destinos:
+        return "Selección manual"
+
+    texto = ", ".join(destinos)
+    if len(texto) <= GIRA_ZONA_MAX_CHARS_ZONAS:
+        return f"Selección manual · {texto}"
+
+    return (
+        f"Selección manual · {len(destinos)} destinos "
+        "(ver la columna Destino de cada fila)"
+    )
+
+
+def ejecutar_gira_selectiva(
+    agente_id: str,
+    card_codes: List[str],
+    modo_prueba: bool = False,
+    email_prueba: str = None,
+    zona_nombre: str = None,
+    dry_run: bool = False,
+) -> Dict:
+    """
+    Genera la gira SOLO para los clientes indicados del agente indicado.
+
+    Reutiliza las mismas funciones que la corrida completa, así que el PDF sale
+    con el mismo formato y los mismos datos.
+
+    IMPORTANTE: modo_prueba y email_prueba son PARÁMETROS, no globals. Leer
+    agentes.MODO_PRUEBA acá produciría una race condition con la cola de la gira
+    completa, que escribe ese mismo global desde otro hilo: una gira de revisión
+    lanzada 30 segundos antes podría terminar enviándose a los agentes reales
+    (sección 6.1 del plan).
+
+    Args:
+        agente_id:    código del vendedor (str o int)
+        card_codes:   CardCodes seleccionados por el usuario
+        modo_prueba:  True = enviar a email_prueba en vez de al agente
+        email_prueba: destino cuando modo_prueba=True
+        zona_nombre:  nombre de zona para el encabezado del PDF y el archivo
+        dry_run:      True = genera el PDF pero NO sube a SharePoint ni envía
+
+    Returns:
+        dict con el resultado real, para que la interfaz pueda informarlo:
+        {
+            "ok": bool,
+            "solicitados": int,       # cuántos pidió el usuario
+            "procesados": int,        # cuántos llegaron al PDF
+            "omitidos": list,         # sin documentos, inexistentes u otro vendedor
+            "omitidos_detalle": dict, # los omitidos separados por motivo
+            "pdf": str | None,
+            "enviado_a": str | None,
+            "dry_run": bool,          # si terminó sin enviar
+            "mensaje": str,
+        }
+    """
+    # El interruptor de módulo manda sobre lo que pida quien llama: nunca puede
+    # habilitar un envío, solo impedirlo.
+    dry_run_efectivo = bool(dry_run) or GIRA_ZONA_FORZAR_DRY_RUN
+
+    resultado = {
+        "ok": False,
+        "solicitados": len(card_codes or []),
+        "procesados": 0,
+        "omitidos": [],
+        "omitidos_detalle": {
+            "sin_documentos": [],
+            "otro_vendedor": [],
+            "inexistentes": [],
+        },
+        "pdf": None,
+        "enviado_a": None,
+        "dry_run": dry_run_efectivo,
+        "mensaje": "",
+    }
+
+    if not card_codes:
+        resultado["mensaje"] = "No se recibió ningún cliente seleccionado"
+        print(f"⚠️ {resultado['mensaje']}")
+        return resultado
+
+    # Mismo kill-switch administrativo que respeta la corrida completa.
+    if not verificar_estado_rpa():
+        resultado["mensaje"] = "RPA desactivado administrativamente en Supabase"
+        print(f"🚫 {resultado['mensaje']}")
+        return resultado
+
+    print("=" * 80)
+    print("🎯 GIRA SELECTIVA POR ZONA")
+    print(f"   Agente: {agente_id} · Clientes solicitados: {len(card_codes)}")
+    print(f"   Zona: {zona_nombre or '(selección mixta)'}")
+    if dry_run_efectivo:
+        motivo = "interruptor del módulo" if GIRA_ZONA_FORZAR_DRY_RUN else "petición"
+        print(f"   🧪 DRY RUN activo por {motivo}: no se sube ni se envía nada")
+    print("=" * 80)
+
+    inicio = time.time()
+
+    conn = ServiceLayerConnection(use_test_db=False)
+    if not conn.login():
+        resultado["mensaje"] = "No se pudo conectar a SAP Service Layer"
+        print(f"❌ {resultado['mensaje']}")
+        return resultado
+
+    try:
+        try:
+            agente_key = int(agente_id)
+        except (TypeError, ValueError):
+            resultado["mensaje"] = f"Código de agente inválido: {agente_id!r}"
+            print(f"❌ {resultado['mensaje']}")
+            return resultado
+
+        vendedores_cache = obtener_vendedores(conn)
+        info_agente = vendedores_cache.get(agente_key)
+        if not info_agente:
+            resultado["mensaje"] = f"Agente {agente_id} no encontrado en SAP"
+            print(f"❌ {resultado['mensaje']}")
+            return resultado
+
+        # ------------------------------------------------------------------
+        # 1. Clientes solicitados (mismo $select que la corrida completa)
+        # ------------------------------------------------------------------
+        print("📋 Trayendo los clientes seleccionados...")
+        clientes = obtener_clientes_por_codigos(conn, card_codes)
+        if not clientes:
+            resultado["mensaje"] = "Ninguno de los clientes solicitados existe en SAP"
+            print(f"⚠️ {resultado['mensaje']}")
+            return resultado
+
+        encontrados = {c.get("CardCode") for c in clientes if c.get("CardCode")}
+        print(f"   {len(encontrados)} de {len(card_codes)} clientes encontrados")
+
+        inexistentes = set(card_codes) - encontrados
+
+        # ------------------------------------------------------------------
+        # 2. Saldos a favor solo de estos clientes
+        # ------------------------------------------------------------------
+        print("📋 Consultando saldos a favor...")
+        saldos_favor_cache = obtener_saldos_favor_masivo(conn, sorted(encontrados))
+
+        # ------------------------------------------------------------------
+        # 3. Procesar cada cliente con la MISMA lógica de la corrida normal
+        #    (mismo patrón multihilo que ejecutar_reportes_gira)
+        # ------------------------------------------------------------------
+        print(f"\n🔄 Evaluando documentos de {len(clientes)} clientes...")
+        agrupados = []
+        con_documentos = set()
+        # Clientes que SI tienen documentos abiertos, pero todos rutean a otro
+        # vendedor. Se separan de los que no tienen nada: para el usuario son dos
+        # situaciones distintas y el mensaje viejo las mezclaba (hallazgo 10).
+        ruteados_a_otro = set()
+        otros_vendedores = set()
+        procesados_cont = 0
+        total_cli = len(clientes)
+
+        with ThreadPoolExecutor(max_workers=GIRA_ZONA_MAX_WORKERS) as executor:
+            futuros = {
+                executor.submit(
+                    procesar_datos_cliente, conn, cli, saldos_favor_cache
+                ): cli
+                for cli in clientes
+            }
+
+            for futuro in as_completed(futuros):
+                procesados_cont += 1
+                cli = futuros[futuro]
+                print(
+                    f"   ⏳ Progreso: {procesados_cont}/{total_cli} clientes evaluados...",
+                    end="\r",
+                )
+
+                try:
+                    perfiles = futuro.result()
+                except Exception as e:
+                    print(f"\n   ⚠️ Error procesando {cli.get('CardCode')}: {e}")
+                    continue
+
+                # perfiles no vacío = el cliente tiene documentos abiertos,
+                # aunque no necesariamente de este agente.
+                ajenos = set()
+                for perfil in perfiles:
+                    v_id = perfil.pop("vendedor_asignado")
+                    # El documento pertenece a este agente según BPAddresses.U_CODV,
+                    # no según el SalesPersonCode del cliente: un cliente puede
+                    # tener direcciones ruteadas a otro vendedor.
+                    if str(v_id) == str(agente_key):
+                        agrupados.append(perfil)
+                        con_documentos.add(cli.get("CardCode"))
+                    else:
+                        ajenos.add(v_id)
+
+                if perfiles and cli.get("CardCode") not in con_documentos:
+                    ruteados_a_otro.add(cli.get("CardCode"))
+                    otros_vendedores.update(ajenos)
+
+        print("\n   ✅ Evaluación completada.")
+
+        sin_documentos = encontrados - con_documentos
+        # Sin ningún documento abierto en SAP: ni propio ni de otro vendedor.
+        sin_nada = sin_documentos - ruteados_a_otro
+
+        resultado["omitidos"] = sorted(inexistentes | sin_documentos)
+        resultado["procesados"] = len(con_documentos)
+
+        # Por qué quedó fuera cada uno. `omitidos` se deja igual para no cambiar
+        # el contrato que ya consume la web; esto se agrega al lado.
+        resultado["omitidos_detalle"] = {
+            "sin_documentos": sorted(sin_nada),
+            "otro_vendedor": sorted(ruteados_a_otro),
+            "inexistentes": sorted(inexistentes),
+        }
+
+        # Frase que explica POR QUE quedaron fuera, para reusarla en los mensajes.
+        # El mensaje viejo decía "no tiene documentos pendientes asignados a X", que
+        # es cierto pero se lee como si todos fueran del otro caso (hallazgo 10).
+        motivos = []
+        if sin_nada:
+            motivos.append(
+                f"{len(sin_nada)} sin ningún documento abierto en SAP"
+            )
+        if ruteados_a_otro:
+            nombres_otros = sorted(
+                vendedores_cache.get(v, {}).get("nombre") or f"vendedor {v}"
+                for v in otros_vendedores
+            )
+            motivos.append(
+                f"{len(ruteados_a_otro)} con documentos abiertos que rutean a "
+                f"otro vendedor ({', '.join(nombres_otros)})"
+            )
+        if inexistentes:
+            motivos.append(f"{len(inexistentes)} sin ficha en SAP")
+        desglose_omitidos = "; ".join(motivos)
+
+        if not agrupados:
+            resultado["mensaje"] = (
+                f"No hay nada que cobrar para {info_agente['nombre']} en esta "
+                f"selección: de {len(card_codes)} clientes, {desglose_omitidos}."
+            )
+            print(f"⏭️ {resultado['mensaje']}")
+            return resultado
+
+        # ------------------------------------------------------------------
+        # 4. Mismo orden que la corrida normal
+        # ------------------------------------------------------------------
+        agrupados.sort(
+            key=lambda c: (
+                c["cliente"].get("nombre", ""),
+                str(c["cliente"].get("zona_gira") or "ZZZ").zfill(3),
+            )
+        )
+
+        # ------------------------------------------------------------------
+        # 5. Estructura idéntica a la que espera generar_pdf_reporte_gira
+        # ------------------------------------------------------------------
+        datos_reporte = {
+            "agente": {
+                "codigo": str(agente_key),
+                "nombre": info_agente["nombre"],
+                "correo": info_agente.get("correo", ""),
+                "zonas": set(),
+            },
+            "totales_agente": {"dolares": 0, "colones": 0},
+            "clientes": [],
+        }
+
+        for datos_cli in agrupados:
+            datos_reporte["clientes"].append(datos_cli)
+            datos_reporte["totales_agente"]["colones"] += datos_cli["totales"]["colones"]
+            datos_reporte["totales_agente"]["dolares"] += datos_cli["totales"]["dolares"]
+            zona = datos_cli["cliente"]["zona_gira"]
+            if zona and zona != "N/A":
+                datos_reporte["agente"]["zonas"].add(str(zona))
+
+        # El nombre de zona que eligió el usuario manda sobre el calculado, porque
+        # zona_gira sale del ShipToCode del documento y no de U_ZGIRA.
+        if zona_nombre:
+            datos_reporte["agente"]["zonas"] = zona_nombre
+        else:
+            datos_reporte["agente"]["zonas"] = _encabezado_zonas_calculado(
+                datos_reporte["agente"]["zonas"]
+            )
+
+        # ------------------------------------------------------------------
+        # 6. PDF en carpeta y con nombre propios: no pisar la gira completa
+        # ------------------------------------------------------------------
+        pdf_path = generar_pdf_reporte_gira(
+            datos_reporte, output_dir=GIRA_ZONA_OUTPUT_DIR
+        )
+        pdf_path = _nombre_archivo_gira_zona(
+            pdf_path, str(agente_key), info_agente["nombre"], zona_nombre
+        )
+        resultado["pdf"] = pdf_path
+        print(f"📄 PDF generado: {pdf_path}")
+        print(
+            f"   {resultado['procesados']} clientes · "
+            f"{len(datos_reporte['clientes'])} bloques · "
+            f"{round(time.time() - inicio, 1)}s"
+        )
+
+        # El motivo de las omisiones va en el mensaje aunque SI se haya generado el
+        # PDF: es el caso normal (43 de 65) y el usuario necesita saber por qué.
+        cola = f" Quedaron fuera {desglose_omitidos}." if desglose_omitidos else ""
+
+        if dry_run_efectivo:
+            resultado["ok"] = True
+            resultado["mensaje"] = (
+                f"DRY RUN: PDF generado con {resultado['procesados']} de "
+                f"{len(card_codes)} clientes. No se subió a SharePoint ni se "
+                f"envió correo.{cola}"
+            )
+            print(f"🧪 {resultado['mensaje']}")
+            return resultado
+
+        # ------------------------------------------------------------------
+        # 7. SharePoint — misma carpeta "Giras", nombre distinto (ver 15.1)
+        # ------------------------------------------------------------------
+        if GIRA_ZONA_SUBIR_SHAREPOINT:
+            try:
+                SharePointUploader().upload_reporte(pdf_path, "Giras")
+            except Exception as e:
+                # Que falle el respaldo no debe impedir que el agente reciba su gira
+                print(f"   ⚠️ Error subiendo a SharePoint: {e}")
+        else:
+            print(
+                "   ☁️ SharePoint: NO se sube "
+                "(GIRA_ZONA_SUBIR_SHAREPOINT = False)"
+            )
+
+        # ------------------------------------------------------------------
+        # 8. Envío
+        # ------------------------------------------------------------------
+        destinatario = email_prueba if modo_prueba else info_agente.get("correo", "")
+
+        if GIRA_ZONA_SOLO_REVISION and not modo_prueba:
+            resultado["mensaje"] = (
+                "Bloqueado por GIRA_ZONA_SOLO_REVISION: esta gira iba en modo REAL "
+                "(directo al agente, con copia a gerencia) y el módulo está en "
+                "ventana de pruebas. El PDF se generó pero no se envió nada."
+            )
+            print(f"🛑 {resultado['mensaje']}")
+            return resultado
+
+        if not destinatario or "@" not in str(destinatario):
+            resultado["mensaje"] = (
+                "El PDF se generó pero no hay un destinatario válido para el envío"
+            )
+            print(f"⚠️ {resultado['mensaje']}")
+            return resultado
+
+        if modo_prueba:
+            print(f"📧 MODO REVISIÓN → {destinatario}")
+        else:
+            print(f"📧 MODO REAL → {destinatario}")
+
+        # El CC a gerencia NUNCA se aplica en modo revisión: una gira dirigida a
+        # un correo puntual es una prueba, y no tiene por qué llegarles a los 5
+        # correos de CORREOS_CC (cuatro de ellos de Químicas Unidas). Así, bajar
+        # GIRA_ZONA_FORZAR_DRY_RUN para probar un envío no puede filtrar nada:
+        # no hay que acordarse de bajar también GIRA_ZONA_CC_ACTIVO.
+        copias = CORREOS_CC if (GIRA_ZONA_CC_ACTIVO and not modo_prueba) else None
+        if copias:
+            print(f"   CC: {', '.join(copias)}")
+        elif modo_prueba:
+            print("   CC: desactivado (modo revisión: nunca se copia a gerencia)")
+        else:
+            print("   CC: desactivado (GIRA_ZONA_CC_ACTIVO = False)")
+
+        exito = EmailSenderAgente().enviar_reporte_gira(
+            destinatario,
+            info_agente["nombre"],
+            pdf_path,
+            cc=copias,
+        )
+
+        resultado["ok"] = bool(exito)
+        resultado["enviado_a"] = destinatario if exito else None
+        resultado["mensaje"] = (
+            f"Gira enviada a {destinatario} con {resultado['procesados']} de "
+            f"{len(card_codes)} clientes.{cola}"
+            if exito
+            else "El PDF se generó pero el correo no pudo enviarse."
+        )
+        print(("✅ " if exito else "❌ ") + resultado["mensaje"])
+
+    except Exception as e:
+        resultado["mensaje"] = f"Error inesperado: {e}"
+        print(f"❌ {resultado['mensaje']}")
+
+    finally:
+        conn.logout()
+
+    return resultado
 
 
 if __name__ == "__main__":

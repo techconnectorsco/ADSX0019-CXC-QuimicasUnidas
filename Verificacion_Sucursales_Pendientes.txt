@@ -1,0 +1,113 @@
+==============================================================================
+VERIFICACION - SUCURSALES SIN SALDO: TIENEN DOCUMENTOS PENDIENTES?
+Quimicas Unidas / ADSX0019
+Fecha: 19/09/2026 12:52:19
+
+Script de SOLO LECTURA. Unicamente GET (mas Login/Logout).
+No escribe, no edita, no elimina, no envia.
+==============================================================================
+
+Conectando a SAP PRODUCCION (solo lectura)...
+
+==============================================================================
+PASO 1 - Universo de sucursales a revisar
+==============================================================================
+
+   Agentes con correo: 3
+   Sucursales con FatherCard y saldo cero: 238
+   De ellas, asignadas a un agente con correo: 102
+
+==============================================================================
+PASO 2 - Documentos abiertos de esas sucursales
+==============================================================================
+
+   Consultando en lotes de 15 codigos...
+
+   Facturas abiertas encontradas: 571
+   Notas de credito abiertas (>= 2022): 28
+
+==============================================================================
+PASO 3 - Saldo real por sucursal
+==============================================================================
+
+   Sucursales revisadas: 102
+   Sucursales SIN ningun documento abierto: 52
+   Sucursales CON al menos un documento abierto: 50
+
+   CODIGO     | NOMBRE                             | PADRE    | FAC  NC |            CRC |          USD
+   ------------------------------------------------------------------------------------------------
+   C0163      | EL COLONO AGROPECUARIO S.A.        | C0161    | 130   4 |           0.00 |    61,114.87
+   C0042      | ALMACENES EL COLONO S.A.           | C0040    |  69   0 |     393,956.11 |    15,450.36
+   C0181      | EL COLONO ZONA NORTE S.A           | C0179    |  63   0 |           0.00 |    17,293.49
+   C0043      | ALMACENES EL COLONO S.A.           | C0040    |  35  10 |     247,707.31 |     2,105.92
+   C0258      | MERCADO DE MATERIALES EL TANQUE S. | C0257    |  30   2 |    -169,225.00 |    11,119.32
+   C0225      | INVERSIONES JOTOCILLO S.A.         | C0223    |  29   0 |           0.00 |    26,972.15
+   C0170      | EL COLONO AGROPECUARIO S.A.        | C0161    |  25   0 |           0.00 |     5,514.47
+   C0244      | MARIN VILLEGAS HUMBERTO            | C0243    |  22   0 |           0.00 |     3,535.98
+   C0139      | CORPORACION COMERCIAL EL LAGAR S.A | C0138    |  13   7 |    -364,027.20 |         0.00
+   C0180      | EL COLONO ZONA NORTE S.A           | C0179    |  18   0 |           0.00 |    11,600.39
+   C0164      | EL COLONO AGROPECUARIO S.A.        | C0161    |  10   1 |     -61,020.00 |    16,801.72
+   C0301      | RAMIREZ ARGUEDAS ROY               | C0300    |   9   1 |           0.00 |     3,148.60
+   C0109      | COOPE ATENAS R.L.                  | C0108    |   8   0 |     426,261.31 |         0.00
+   C0084      | CENTRO AGRICOLA CANTONAL DE SARCHI | C0083    |   6   0 |   1,414,025.51 |         0.00
+   C0144      | DANIEL GERARDO CORDOBA BARRIENTOS  | C0143    |   6   0 |           0.00 |       185.24
+   C0169      | EL COLONO AGROPECUARIO S.A.        | C0161    |   6   0 |           0.00 |     3,485.12
+   C0328      | SOTO CASTILLO JUAN MARTIN          | C0327    |   6   0 |           0.00 |    21,671.93
+   C0334      | SUPER VETERINARIA DE LIBERIA, S.A. | C0333    |   6   0 |     242,066.61 |       711.04
+   C0118      | COOPESABALITO R.L.                 | C0117    |   5   0 |           0.00 |     2,708.93
+   C0178      | EL COLONO LA JUNGLA S.A.           | C0176    |   2   3 |           0.00 |    -1,424.95
+   C0245      | MARIN VILLEGAS HUMBERTO            | C0243    |   5   0 |           0.00 |     1,027.17
+   C0259      | MERCADO DE MATERIALES EL TANQUE S. | C0257    |   5   0 |     342,906.33 |     1,639.73
+   C0440      | EL COLONO AGROPECUARIO S.A.        | C0161    |   5   0 |           0.00 |     5,969.86
+   C0340      | TEC. AGRICOLAS LLANO LOS ANGELES S | C0338    |   5   0 |           0.00 |     8,777.89
+   C0302      | RAMIREZ ARGUEDAS ROY               | C0300    |   4   0 |           0.00 |       986.47
+   C0073      | CENTRO AGRIC. CANT. DE ESPARZA     | C0072    |   3   0 |           0.00 |       531.47
+   C0076      | CENTRO AGRIC.CANTONAL DE PUNTARENA | C0075    |   3   0 |     187,149.70 |       642.36
+   C0085      | CENTRO AGRICOLA CANTONAL DE SARCHI | C0083    |   3   0 |      35,859.41 |         0.00
+   C0119      | COOPESABALITO R.L.                 | C0117    |   3   0 |           0.00 |       374.70
+   C0224      | INVERSIONES JOTOCILLO S.A.         | C0223    |   3   0 |           0.00 |     1,670.83
+   C0316      | RUIZ ROJAS CARLOS ALBERTO          | C0314    |   3   0 |           0.00 |       190.50
+   C0315      | RUIZ ROJAS CARLOS ALBERTO          | C0314    |   3   0 |           0.00 |     1,377.01
+   C0322      | SISTEMAS Y CABLEADOS ESTRUCTURADOS | C0321    |   3   0 |           0.00 |       660.13
+   C0060      | CAMARA DE GANADEROS DE SANTA CRUZ  | C0059    |   2   0 |     250,189.59 |         0.00
+   C0077      | CENTRO AGRIC.CANTONAL DE PUNTARENA | C0075    |   2   0 |           0.00 |        37.04
+   C0177      | EL COLONO LA JUNGLA S.A.           | C0176    |   2   0 |           0.00 |       632.65
+   C0255      | MENDEZ HIDALGO HEINER              | C0254    |   2   0 |           0.00 |       785.12
+   C0329      | SOTO CASTILLO JUAN MARTIN          | C0327    |   2   0 |           0.00 |     9,007.09
+   C0339      | TEC. AGRICOLAS LLANO LOS ANGELES S | C0338    |   2   0 |           0.00 |     1,313.01
+   C0361      | FRANCISCO JIMENEZ QUESADA          | C0398    |   2   0 |           0.00 |     1,232.91
+   C0444      | INVERSIONES JOTOCILLO S.A.         | C0223    |   2   0 |           0.00 |       910.17
+   C0074      | CENTRO AGRIC. CANT. DE ESPARZA     | C0072    |   1   0 |           0.00 |        70.03
+   C0110      | COOPE ATENAS R.L.                  | C0108    |   1   0 |      53,901.54 |         0.00
+   C0087      | CENTRO DE SERVICIO ESCALANTE GALLA | C0086    |   1   0 |           0.00 |       452.44
+   C0162      | EL COLONO AGROPECUARIO S.A.        | C0161    |   1   0 |           0.00 |     3,101.96
+   C0182      | EL COLONO ZONA NORTE S.A           | C0179    |   1   0 |     295,314.20 |         0.00
+   C0256      | MENDEZ HIDALGO HEINER              | C0254    |   1   0 |           0.00 |        94.69
+   C0282      | PAPAGAYO DO IT CENTER S.A.         | C0281    |   1   0 |     277,641.00 |         0.00
+   C0335      | SUPER VETERINARIA DE LIBERIA, S.A. | C0333    |   1   0 |           0.00 |       116.99
+   C0360      | FRANCISCO JIMENEZ QUESADA          | C0398    |   1   0 |           0.00 |       984.76
+
+==============================================================================
+CONCLUSION
+==============================================================================
+
+   50 sucursales tienen 599 documentos abiertos
+   pese a reportar CurrentAccountBalance = 0.
+
+   CAUSA: en SAP el saldo de una sucursal con FatherCard se consolida
+   en la cuenta padre, por eso la sucursal reporta balance cero aunque
+   tenga facturas abiertas. No es compensacion con notas de credito:
+   el desglose FAC/NC de arriba lo confirma (hay sucursales con
+   decenas de facturas y cero notas de credito).
+
+   Por eso obtener_clientes_con_saldo() en agentes.py usa el filtro
+   'CurrentAccountBalance != 0 OR FatherCard != null'. Sin esa segunda
+   condicion estos documentos se pierden por completo.
+
+   -> La gira completa SI muestra estas lineas en el PDF.
+   -> El arbol del modulo nuevo, con el filtro que propone el plan
+      (solo 'saldo != 0'), las perderia.
+   -> El arbol DEBE replicar el filtro de agentes.py. No es una
+      decision de producto: es una inconsistencia a corregir.
+
+   Duracion: 13.6 segundos
