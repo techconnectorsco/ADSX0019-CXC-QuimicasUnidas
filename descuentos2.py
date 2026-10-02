@@ -3,24 +3,13 @@ investigar_descuentos_v2.py
 Compara qué devuelve SAP para los clientes que salieron "chicos" en el cache.
 """
 
-import sys, os, uuid, json
+import sys, os, json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from modules.database.conexion import ServiceLayerConnection
-
-
-def ejecutar_sql_sl(conn, sql):
-    code = f"QU_PR_{uuid.uuid4().hex[:8]}"
-    url = f"{conn.base_url}/SQLQueries"
-    resp = conn.session.post(
-        url, json={"SqlCode": code, "SqlName": "Inv", "SqlText": sql}
-    )
-    if resp.status_code not in (200, 201):
-        print(f"❌ {resp.text}")
-        return []
-    res = conn.get(f"SQLQueries('{code}')/List", {})
-    conn.session.delete(f"{url}('{code}')")
-    return res.get("value", []) if res else []
+from modules.database.conexion import (
+    ServiceLayerConnection,
+    ejecutar_sql_sl,
+)
 
 
 def investigar():

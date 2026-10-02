@@ -1,0 +1,128 @@
+==============================================================================
+FIDELIDAD DEL PASO 1 - MAPA DE RUTEO vs EL PDF DE HOY
+Quimicas Unidas / ADSX0019 - rama giras_por_zona
+Fecha: 01/10/2026 10:08:30
+
+Version acotada: las consultas se limitan a los clientes probados,
+para poder correr de dia. SOLO LECTURA.
+==============================================================================
+
+Conectando a SAP PRODUCCION...
+
+==============================================================================
+PASO A - A quienes se les va a preguntar
+==============================================================================
+
+   Una consulta liviana trae los clientes que el arbol viejo
+   ofrece hoy (por SlpCode de la ficha)...
+   Fichas: 306
+   Agente 6   |   80 en el arbol viejo | se prueban 12
+   Agente 7   |  123 en el arbol viejo | se prueban 12
+   Agente 9   |  103 en el arbol viejo | se prueban 12
+
+   Total: 38 par(es) cliente-agente sobre 38 cliente(s)
+
+==============================================================================
+PASO B - El mapa, acotado a esos clientes
+==============================================================================
+
+
+   14 par(es) en el mapa, en 74.3s
+
+==============================================================================
+PASO C - El oraculo: lo que hoy sale en el PDF
+==============================================================================
+
+   Trayendo fichas y saldos a favor de los 38 clientes...
+
+   Consultando el oraculo cliente por cliente...
+
+==============================================================================
+PASO D - La comparacion
+==============================================================================
+
+   CLIENTE   AG   | DOCS SQL DOCS PDF | CRC SQL         CRC PDF         | DIF
+   ----------------------------------------------------------------------------------------------
+   C0006     6    |        1        1 |            0.00            0.00 |     0.00
+   C0012     9    |        4        4 |            0.00            0.00 |     0.00
+   C0035     6    |        7        7 |            0.00            0.00 |     0.00
+   C0040     7    |       10       10 |       101005.00       101005.00 |     0.00
+   C0042     7    |       41       41 |       286223.42       286223.02 |     0.40
+   C0043     7    |       29       29 |        78050.40        78050.47 |     0.07
+   C0048     6    |       34       34 |      2663868.02      2663869.54 |     1.52
+   C0049     7    |        3        3 |        -6778.16        -6778.16 |     0.00
+   C0060     7    |        2        2 |       250189.80       250189.59 |     0.21
+   C0063     6    |        2        2 |        15019.05        15019.05 |     0.00
+
+   38 par(es) coinciden (28 de ellos porque los dos dicen que no
+   hay nada, que tambien es coincidir), 0 difieren.
+   Peor diferencia de monto: 1.52
+
+   OK    el conteo de documentos coincide en todos los pares probados
+   OK    las diferencias de monto se quedan en el redondeo de /SQLQueries (peor: 1.52)
+
+==============================================================================
+PASO E - Casos conocidos
+==============================================================================
+
+   OK    C0042 aparece en el mapa del agente 7
+         41 documentos, 286223.42 CRC, 10098.91 USD
+
+   OK    C0037 queda FUERA del mapa del agente 9
+   OK    C0080 queda FUERA del mapa del agente 9
+   OK    C0121 queda FUERA del mapa del agente 9
+
+==============================================================================
+PASO F - Los no elegibles, que es el objetivo del cambio
+==============================================================================
+
+   De los clientes que el arbol viejo ofrece para estos agentes,
+   cuantos NO aportan nada al PDF. Son los que hoy se pueden
+   marcar y no salen, y los que el prefiltro va a ocultar.
+
+   Agente 6   |  12 probados |   8 sin carga (67%)
+                 C0007  AGRO ESCAZU LTDA
+                 C0009  AGRO SERVICIOS EL SALITRE S.A.
+                 C0010  AGRO SERVICIOS EL SALITRE S.A.
+                 C0011  AGRO SERVICIOS EL SALITRE S.A.
+                 C0021  AGROQUIMICOS EL PARQUE S Y Q S.A.
+                 C0028  AGROVETERINARIA LA YUNTA S.A.
+                 C0029  AGROVETERINARIA LA YUNTA S.A.
+                 C0030  AGROVETERINARIA LA YUNTA S.A.
+   Agente 7   |  12 probados |   7 sin carga (58%)
+                 C0017  AGROLAND GOLD. S.R.L
+                 C0041  ALMACENES EL COLONO S.A.
+                 C0044  ALMACENES EL COLONO S.A.
+                 C0051  AYALES MATARRITA FUED
+                 C0059  CAMARA DE GANADEROS DE SANTA CRUZ
+                 C0061  CAMARA DE GANADEROS DE SANTA CRUZ
+                 C0072  CENTRO AGRIC. CANT. DE ESPARZA
+   Agente 9   |  14 probados |  13 sin carga (93%)
+                 C0004  AGRIAVANCES BRUMOSOS S.A.
+                 C0008  KARLA JOHANNA PICADO RAMIREZ
+                 C0032  ALMACEN AGRO LOGOS COLONIA S.A.
+                 C0033  ALMACEN AGRO LOGOS S.A
+                 C0034  ALMACEN AGROLOGOS SAN JOSE UPALA
+                 C0036  ALMACEN COOPEVEGA S.A.
+                 C0037  ALMACEN COOPEVEGA S.A.
+                 C0038  ALMACEN COOPEVEGA S.A.
+                 C0066  EL COLONO AGROPECUARIO S.A.
+                 C0068  CASTILLO JIMENEZ PEDRO ANTONIO
+                 C0079  CENTRO AGRICOLA CANTONAL DE COTO BRUS
+                 C0080  CENTRO AGRICOLA CANTONAL DE COTO BRUS
+
+   OJO: este porcentaje es de la MUESTRA, no del universo. El
+   numero real por agente sale del barrido completo, que hay que
+   correr de noche (validar_paso1_mapa_ruteo.py).
+
+==============================================================================
+RESULTADO
+==============================================================================
+
+   Duracion: 3.5 minutos
+
+   TODOS LOS CONTROLES PASARON.
+
+   El mapa dice lo mismo que el PDF en los clientes probados. Lo que
+   queda para la noche es el barrido del universo completo, que mide
+   el conteo por agente, no la regla.

@@ -1,0 +1,28 @@
+==============================================================================
+VALIDACION DE LOS PASOS 2 Y 3 - EL ARBOL Y EL CACHE
+Quimicas Unidas / ADSX0019 - rama giras_por_zona
+Fecha: 01/10/2026 11:12:42
+
+SOLO LECTURA. No encola, no genera, no envia.
+==============================================================================
+
+Conectando a SAP PRODUCCION...
+
+==============================================================================
+PASO A - Armar el arbol de cada agente
+==============================================================================
+
+   --- Agente 6
+
+   FALLA se pudo armar el arbol del agente 6   ejecutar_sql_sl: SAP rechazó el query (500): Fail to connect to SLD.
+
+   SAP no devolvio el mapa completo. Esto NO invalida los
+   Pasos 2 y 3: es el timeout de horario de oficina
+   (17.14.12). Reintentar de noche.
+
+==============================================================================
+RESULTADO
+==============================================================================
+
+   FALLARON 1 control(es):
+      - se pudo armar el arbol del agente 6

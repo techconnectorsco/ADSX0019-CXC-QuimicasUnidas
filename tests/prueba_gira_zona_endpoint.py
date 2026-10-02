@@ -4,6 +4,10 @@ Niveles 2 y 3 del plan de pruebas de "Giras por Zona" (PLAN_GIRAS_POR_ZONA.md, s
 Reemplaza los curl del plan, que en PowerShell son incómodos de escribir por las
 comillas. Habla con la API por HTTP; no importa agentes.py ni api.py.
 
+    # El arbol de un agente, con la elegibilidad resuelta. Solo lectura.
+    python tests/prueba_gira_zona_endpoint.py arbol --agente 7
+    python tests/prueba_gira_zona_endpoint.py arbol --agente 7 --refrescar
+
     # Nivel 2 — validación de parámetros. No encola nada, no toca SAP.
     python tests/prueba_gira_zona_endpoint.py validacion
 
@@ -35,7 +39,7 @@ if hasattr(sys.stdout, "reconfigure"):
 BASE_POR_DEFECTO = "http://127.0.0.1:8050"
 
 
-def _pedir(base, ruta, cuerpo=None):
+def _pedir(base, ruta, cuerpo=None, timeout=30):
     url = f"{base}{ruta}"
     datos = json.dumps(cuerpo).encode("utf-8") if cuerpo is not None else None
     req = urllib.request.Request(
@@ -45,7 +49,7 @@ def _pedir(base, ruta, cuerpo=None):
         method="POST" if datos else "GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read().decode("utf-8") or "{}")
@@ -53,6 +57,67 @@ def _pedir(base, ruta, cuerpo=None):
         print(f"❌ No se pudo contactar {url}: {e.reason}")
         print("   ¿Está corriendo la API?  python api.py")
         sys.exit(1)
+
+
+def cmd_arbol(args):
+    """
+    GET /api/arbol-gira-zona — el arbol con la elegibilidad resuelta.
+
+    Solo lectura: no encola nada. Es el endpoint que reemplaza a
+    obtenerArbolAgente() de sap.ts, que armaba el arbol por SalesPersonCode de
+    la ficha en vez de por el ruteo real del documento.
+
+    El timeout es alto a proposito: con el cache frio hay que esperar el
+    barrido del mapa, que en horario de oficina son ~100s.
+    """
+    ruta = f"/api/arbol-gira-zona?agente={args.agente}"
+    if args.refrescar:
+        ruta += "&refrescar=1"
+
+    inicio = time.time()
+    estado, datos = _pedir(args.base, ruta, timeout=args.timeout)
+    segs = time.time() - inicio
+
+    if datos.get("error"):
+        print(f"❌ {datos['error']}")
+        return 1
+
+    agente = datos.get("agente") or {}
+    print(f"Agente {agente.get('codigo')} — {agente.get('nombre')}")
+    print(f"HTTP {estado} en {segs:.1f}s")
+    print("")
+    print(f"   Elegibles    : {datos.get('totalElegibles')}")
+    print(f"   En gris      : {datos.get('totalNoElegibles')}")
+    print(f"   Zonas        : {len(datos.get('zonas') or [])}")
+    print(f"   Sin zona     : {len(datos.get('sinZona') or [])}")
+    if datos.get("montosAproximados"):
+        print("   Los montos son APROXIMADOS (redondeo de /SQLQueries).")
+
+    for z in datos.get("zonas") or []:
+        zona = z["zona"]
+        print("")
+        print(f"   --- {zona['codigo']}  {zona['nombre']}"
+              f"   ({z['totalElegibles']} elegibles,"
+              f" {z['totalNoElegibles']} en gris)")
+        for c in z["clientes"]:
+            if c["elegible"]:
+                marca = f"{c['docs']:>3} docs  CRC {c['crc']:>14,.2f}"
+                if c["usd"]:
+                    marca += f"  USD {c['usd']:>10,.2f}"
+            else:
+                motivo = c.get("motivo") or "?"
+                if c.get("vendedorNombre"):
+                    motivo += f" ({c['vendedorNombre']})"
+                marca = f"  --   en gris: {motivo}"
+            print(f"      {c['cardCode']:<8} {c['cardName'][:38]:<38} {marca}")
+
+    if datos.get("sinZona"):
+        print("")
+        print("   --- Sin zona asignada")
+        for c in datos["sinZona"]:
+            print(f"      {c['cardCode']:<8} {c['cardName'][:38]}")
+
+    return 0
 
 
 def cmd_config(args):
@@ -152,6 +217,13 @@ def main():
     p.add_argument("--base", default=BASE_POR_DEFECTO, help=f"URL de la API (def. {BASE_POR_DEFECTO})")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    a = sub.add_parser("arbol", help="El árbol de un agente (solo lectura)")
+    a.add_argument("--agente", required=True, help="Código del vendedor. Ej: 7")
+    a.add_argument("--refrescar", action="store_true",
+                   help="Tira el caché y vuelve a barrer SAP")
+    a.add_argument("--timeout", type=int, default=300,
+                   help="Segundos de espera (def. 300; el caché frío tarda)")
+
     sub.add_parser("config", help="Ver en qué modo está el módulo")
     sub.add_parser("validacion", help="Nivel 2 — parámetros inválidos")
 
@@ -162,7 +234,12 @@ def main():
     d.add_argument("--timeout", type=int, default=300, help="Segundos de espera (def. 300)")
 
     args = p.parse_args()
-    fn = {"config": cmd_config, "validacion": cmd_validacion, "dry-run": cmd_dry_run}[args.cmd]
+    fn = {
+        "arbol": cmd_arbol,
+        "config": cmd_config,
+        "validacion": cmd_validacion,
+        "dry-run": cmd_dry_run,
+    }[args.cmd]
     sys.exit(fn(args) or 0)
 
 

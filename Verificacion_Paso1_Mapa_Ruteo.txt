@@ -1,0 +1,236 @@
+==============================================================================
+VALIDACION DEL PASO 1 - MAPA DE RUTEO MASIVO
+Quimicas Unidas / ADSX0019 - rama giras_por_zona
+Fecha: 01/10/2026 09:26:50
+
+SOLO LECTURA. GET + los POST/DELETE a /SQLQueries que son el
+mecanismo del Service Layer para correr un SELECT. No envia nada,
+no genera documentos en SAP y no toca SharePoint ni correo.
+==============================================================================
+
+Conectando a SAP PRODUCCION...
+
+==============================================================================
+PASO A - Los cuatro queries y el tiempo
+==============================================================================
+
+   Si el parser rechaza alguno, ejecutar_sql_sl lo avisa en la
+   linea de arriba y el mapa sale incompleto o vacio.
+
+
+   OK    el mapa no volvio vacio
+   FALLA responde en segundos, no minutos (259.2s)   259.2s
+
+   Pares cliente-vendedor : 124
+   Clientes distintos     : 120
+   Vendedores distintos   : 5
+   Tiempo                 : 259.2s
+
+==============================================================================
+PASO B - El mapa por agente, contra el arbol viejo
+==============================================================================
+
+   Trayendo el universo de obtener_clientes_con_saldo() por OData
+   (lento, ~350 llamadas) para reconstruir el arbol de hoy...
+   Universo de OData: 427 clientes
+
+   AG   NOMBRE                 |    ARBOL     MAPA |    AMBOS   NUEVOS INUTILES
+   ----------------------------------------------------------------------------------
+   6    Siviany González       |       59       13 |       11        2       48
+   7    Berny Marín Chavez     |       72       16 |       14        2       58
+   9    José Chacón            |       62       11 |       10        1       52
+
+   INUTILES es el reclamo original: clientes que la pantalla deja
+   marcar y que nunca salen en el PDF. NUEVOS es el otro lado, el
+   que no estaba reportado: clientes con carga que el arbol no
+   mostraba porque filtraba por la ficha y no por el ruteo.
+
+==============================================================================
+PASO C - Fidelidad contra el oraculo
+==============================================================================
+
+   El oraculo es obtener_documentos_cliente(), el Python que hoy
+   alimenta el PDF, con el cache de saldos a favor puesto.
+   Muestra de 10 clientes por region y agente.
+
+   --- Agente 6, region AMBOS (11 clientes, se prueban 10)
+
+   CLIENTE   AG    | DOCS SQL  DOCS ORA  | CRC SQL        CRC ORACULO    | DIF
+   --------------------------------------------------------------------------------------------
+   C0048     6     |         5        34 |      -22455.83     2663869.54 | 2686325.37  <-- DOCS
+   C0108     6     |         1         1 |      -12472.14      -12472.14 |     0.00
+   C0258     6     |         2        29 |     -242046.00     -169225.00 | 72821.00  <-- DOCS
+   C0325     6     |         1         2 |       -7707.95       -7707.95 |     0.00  <-- DOCS
+   C0326     6     |         4        18 |           0.00           0.00 |     0.00  <-- DOCS
+   C0367     6     |         1         6 |       -2585.39       -2585.39 |     0.00  <-- DOCS
+   C0486     6     |         1         8 |       -1650.84      386165.70 | 387816.54  <-- DOCS
+   C0489     6     |         3         5 |      -11269.01      -11269.01 |     0.00  <-- DOCS
+   C0490     6     |         1         9 |     -101173.57     -101173.57 |     0.00  <-- DOCS
+   C0503     6     |         1         2 |       -1044.35       -1044.35 |     0.00  <-- DOCS
+
+   Agente 6 / ambos: 1 coinciden en documentos, 9 difieren. Peor diferencia de monto: 2686325.37
+
+   --- Agente 6, region NUEVOS (2 clientes, se prueban 2)
+
+   CLIENTE   AG    | DOCS SQL  DOCS ORA  | CRC SQL        CRC ORACULO    | DIF
+   --------------------------------------------------------------------------------------------
+   C0043     6     |         2        12 |           0.00      169656.84 | 169656.84  <-- DOCS
+   C0139     6     |         2         8 |     -347565.38      415994.58 | 763559.96  <-- DOCS
+
+   Agente 6 / nuevos: 0 coinciden en documentos, 2 difieren. Peor diferencia de monto: 763559.96
+
+   --- Agente 6, region INUTILES (48 clientes, se prueban 10)
+
+   CLIENTE   AG    | DOCS SQL  DOCS ORA  | CRC SQL        CRC ORACULO    | DIF
+   --------------------------------------------------------------------------------------------
+   C0006     6     |         0         1 |           0.00           0.00 |     0.00  <-- DOCS
+   C0010     6     |         0         0 |           0.00           0.00 |     0.00
+   C0011     6     |         0         0 |           0.00           0.00 |     0.00
+   C0029     6     |         0         0 |           0.00           0.00 |     0.00
+   C0030     6     |         0         0 |           0.00           0.00 |     0.00
+   C0035     6     |         0         7 |           0.00           0.00 |     0.00  <-- DOCS
+   C0063     6     |         0         2 |           0.00       15019.05 | 15019.05  <-- DOCS
+   C0064     6     |         0         3 |           0.00       54333.56 | 54333.56  <-- DOCS
+   C0067     6     |         0        14 |           0.00           0.00 |     0.00  <-- DOCS
+   C0078     6     |         0         2 |           0.00           0.00 |     0.00  <-- DOCS
+
+   Agente 6 / inutiles: 4 coinciden en documentos, 6 difieren. Peor diferencia de monto: 54333.56
+
+   --- Agente 7, region AMBOS (14 clientes, se prueban 10)
+
+   CLIENTE   AG    | DOCS SQL  DOCS ORA  | CRC SQL        CRC ORACULO    | DIF
+   --------------------------------------------------------------------------------------------
+   C0040     7     |         9        10 |           0.00      101005.00 | 101005.00  <-- DOCS
+   C0043     7     |         6        31 |           0.00       78050.47 | 78050.47  <-- DOCS
+   C0049     7     |         2         3 |       -6778.16       -6778.16 |     0.00  <-- DOCS
+   C0099     7     |         1         6 |      -89955.21      -89955.21 |     0.00  <-- DOCS
+   C0104     7     |         3        20 |     -874889.59     1246453.66 | 2121343.25  <-- DOCS
+   C0161     7     |         8         8 |           0.00           0.00 |     0.00
+   C0163     7     |         4       102 |           0.00           0.00 |     0.00  <-- DOCS
+   C0164     7     |         1         9 |      -61020.00      -61020.00 |     0.00  <-- DOCS
+   C0210     7     |         1         2 |           0.00           0.00 |     0.00  <-- DOCS
+   C0254     7     |         2         3 |       -6351.22       -6351.22 |     0.00  <-- DOCS
+
+   Agente 7 / ambos: 1 coinciden en documentos, 9 difieren. Peor diferencia de monto: 2121343.25
+
+   --- Agente 7, region NUEVOS (2 clientes, se prueban 2)
+
+   CLIENTE   AG    | DOCS SQL  DOCS ORA  | CRC SQL        CRC ORACULO    | DIF
+   --------------------------------------------------------------------------------------------
+   C0139     7     |         1         2 |     -106943.20     -105256.79 |  1686.41  <-- DOCS
+   C0347     7     |         1        22 |     -127904.70     6068213.00 | 6196117.70  <-- DOCS
+
+   Agente 7 / nuevos: 0 coinciden en documentos, 2 difieren. Peor diferencia de monto: 6196117.70
+
+   --- Agente 7, region INUTILES (58 clientes, se prueban 10)
+
+   CLIENTE   AG    | DOCS SQL  DOCS ORA  | CRC SQL        CRC ORACULO    | DIF
+   --------------------------------------------------------------------------------------------
+   C0041     7     |         0         0 |           0.00           0.00 |     0.00
+   C0042     7     |         0        49 |           0.00      286223.02 | 286223.02  <-- DOCS
+   C0044     7     |         0         0 |           0.00           0.00 |     0.00
+   C0059     7     |         0         0 |           0.00           0.00 |     0.00
+   C0060     7     |         0         2 |           0.00      250189.59 | 250189.59  <-- DOCS
+   C0061     7     |         0         0 |           0.00           0.00 |     0.00
+   C0072     7     |         0         0 |           0.00           0.00 |     0.00
+   C0073     7     |         0         3 |           0.00           0.00 |     0.00  <-- DOCS
+   C0074     7     |         0         1 |           0.00           0.00 |     0.00  <-- DOCS
+   C0075     7     |         0         2 |           0.00        6194.41 |  6194.41  <-- DOCS
+
+   Agente 7 / inutiles: 5 coinciden en documentos, 5 difieren. Peor diferencia de monto: 286223.02
+
+   --- Agente 9, region AMBOS (10 clientes, se prueban 10)
+
+   CLIENTE   AG    | DOCS SQL  DOCS ORA  | CRC SQL        CRC ORACULO    | DIF
+   --------------------------------------------------------------------------------------------
+   C0101     9     |         1        20 |       -1867.26       -1867.26 |     0.00  <-- DOCS
+   C0138     9     |         1         1 |      -22898.05      -22898.05 |     0.00
+   C0139     9     |         4        11 |    -1280360.22     -384032.08 | 896328.14  <-- DOCS
+   C0178     9     |         3         9 |           0.00           0.00 |     0.00  <-- DOCS
+   C0243     9     |         1         4 |       -3290.48       -3290.48 |     0.00  <-- DOCS
+   C0301     9     |         1        10 |           0.00           0.00 |     0.00  <-- DOCS
+   C0458     9     |         1         2 |      -61850.71      295113.04 | 356963.75  <-- DOCS
+   C0487     9     |         1         2 |       -3151.42       -3151.42 |     0.00  <-- DOCS
+   C0495     9     |         1         5 |       -3719.16       -3719.16 |     0.00  <-- DOCS
+   CE9015    9     |         2         2 |        -531.81        -531.81 |     0.00
+
+   Agente 9 / ambos: 2 coinciden en documentos, 8 difieren. Peor diferencia de monto: 896328.14
+
+   --- Agente 9, region NUEVOS (1 clientes, se prueban 1)
+
+   CLIENTE   AG    | DOCS SQL  DOCS ORA  | CRC SQL        CRC ORACULO    | DIF
+   --------------------------------------------------------------------------------------------
+   C0043     9     |         1        12 |           0.00           0.00 |     0.00  <-- DOCS
+
+   Agente 9 / nuevos: 0 coinciden en documentos, 1 difieren. Peor diferencia de monto: 1821.10
+
+   --- Agente 9, region INUTILES (52 clientes, se prueban 10)
+
+   CLIENTE   AG    | DOCS SQL  DOCS ORA  | CRC SQL        CRC ORACULO    | DIF
+   --------------------------------------------------------------------------------------------
+   C0012     9     |         0         4 |           0.00           0.00 |     0.00  <-- DOCS
+   C0037     9     |         0         0 |           0.00           0.00 |     0.00
+   C0038     9     |         0         0 |           0.00           0.00 |     0.00
+   C0066     9     |         0         0 |           0.00           0.00 |     0.00
+   C0080     9     |         0         0 |           0.00           0.00 |     0.00
+   C0081     9     |         0         0 |           0.00           0.00 |     0.00
+   C0082     9     |         0         5 |           0.00           0.00 |     0.00  <-- DOCS
+   C0086     9     |         0         0 |           0.00           0.00 |     0.00
+   C0087     9     |         0         3 |           0.00           0.00 |     0.00  <-- DOCS
+   C0088     9     |         0         0 |           0.00           0.00 |     0.00
+
+   Agente 9 / inutiles: 7 coinciden en documentos, 3 difieren. Peor diferencia de monto: 3492.16
+
+   FALLA el conteo de documentos coincide en toda la muestra (20 iguales, 45 distintos)   45 pares difieren en documentos
+   FALLA las diferencias de monto se quedan en el redondeo esperado (peor: 6196117.70)   peor diferencia 6196117.70, por encima de la tolerancia de 10.00
+
+==============================================================================
+PASO D - Casos conocidos
+==============================================================================
+
+   FALLA C0042 aparece en el mapa del agente 7   no esta en el mapa, y el 27/09 tenia 45 documentos
+
+   OK    C0037 queda FUERA del mapa del agente 9
+   OK    C0080 queda FUERA del mapa del agente 9
+   OK    C0121 queda FUERA del mapa del agente 9
+
+==============================================================================
+PASO E - Los clientes nuevos y su zona
+==============================================================================
+
+   Medicion que el Paso 0 dejo pendiente: de los clientes que el
+   mapa agrega, cuantos tienen U_ZGIRA vacio. Si son cero, el
+   grupo 'sin zona' de la pantalla sigue sin necesitar interfaz.
+
+   Agente 6   |    2 nuevos |    0 sin U_ZGIRA
+   Agente 7   |    2 nuevos |    0 sin U_ZGIRA
+   Agente 9   |    1 nuevos |    0 sin U_ZGIRA
+
+   Ningun cliente nuevo sin U_ZGIRA: 'sin zona' sigue vacio y
+   no hace falta construirle interfaz.
+
+==============================================================================
+PASO F - La cuarta consulta: fichas por vendedor
+==============================================================================
+
+   Es la que el Paso 2 usa para mostrar en gris a los no
+   elegibles. Se prueba aca que el query corra y traiga a los
+   clientes que el arbol viejo ofrece.
+
+   Fichas traidas por SlpCode IN (6, 7, 9): 306
+   OK    la consulta de fichas trae a todos los del arbol viejo
+   No elegibles con ficha disponible para pintarlos: 158
+
+==============================================================================
+RESULTADO
+==============================================================================
+
+   Duracion total: 10.6 minutos
+
+   FALLARON 4 control(es):
+      - responde en segundos, no minutos (259.2s)
+      - el conteo de documentos coincide en toda la muestra (20 iguales, 45 distintos)
+      - las diferencias de monto se quedan en el redondeo esperado (peor: 6196117.70)
+      - C0042 aparece en el mapa del agente 7
+
+   El Paso 1 NO esta validado. No seguir al Paso 2.

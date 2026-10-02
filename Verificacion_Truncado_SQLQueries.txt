@@ -1,0 +1,81 @@
+==============================================================================
+TRUNCADO DE /SQLQueries/List - impacto y verificacion del arreglo
+Quimicas Unidas / ADSX0019
+Fecha: 30/09/2026 23:45:51
+
+SOLO LECTURA de datos. No envia nada, no genera PDF.
+==============================================================================
+
+Conectando a SAP PRODUCCION...
+
+==============================================================================
+PASO 1 - El sintoma: el mismo query, con y sin la cabecera
+==============================================================================
+
+   Facturas abiertas de toda la empresa:
+      sin la cabecera (como estaba):       20 filas
+      con Prefer: odata.maxpagesize:    1,091 filas
+      El arreglo recupera 1,071 filas (55x).
+
+==============================================================================
+PASO 2 - Filas PR por cliente (una sola consulta agrupada)
+==============================================================================
+
+   Clientes con filas PR : 105
+   Filas PR en total     : 135
+   Clientes con mas de 20: 0
+
+   Los que mas filas tienen:
+      C0040             9 filas
+      C0161             8 filas
+      C0048             5 filas
+      C0489             3 filas
+      CC10117           2 filas
+      CC1001999         2 filas
+      C0507             2 filas
+      C0475             2 filas
+
+==============================================================================
+PASO 3 - Cuanto perdia cada lote de 15 clientes
+==============================================================================
+
+   obtener_saldos_favor_masivo() consulta JDT1 en lotes de 15 clientes.
+   El truncado es POR LOTE: si los 15 juntos pasaban de 20 filas, el
+   resto se caia. Se reconstruyen los lotes en el mismo orden.
+
+   Clientes en el universo de la gira: 8,036
+
+   Lotes en total            : 536
+   Lotes que se truncaban    : 0 (0.0%)
+   Filas PR que se perdian   : 0 de 135 (0.0%)
+   Clientes en lotes afectados: 0
+
+==============================================================================
+PASO 4 - La funcion de produccion, ya arreglada
+==============================================================================
+
+   obtener_saldos_favor_masivo() sobre los clientes que mas filas PR
+   tienen: antes devolvia como maximo 20 por lote.
+
+   CLIENTE        ESPERADO   DEVUELTO   ESTADO
+   ----------------------------------------------------
+   C0040                 9          9   OK
+   C0161                 8          8   OK
+   C0048                 5          5   OK
+   C0489                 3          3   OK
+   CC10117               2          2   OK
+   CC1001999             2          2   OK
+   C0507                 2          2   OK
+   C0475                 2          2   OK
+
+==============================================================================
+CONCLUSION
+==============================================================================
+
+   Con los datos de hoy ningun lote pasaba de 20 filas, asi que el
+   bug no estaba produciendo perdida todavia. El arreglo igual
+   corresponde: era cuestion de tiempo.
+
+   SQL_MAX_PAGE_SIZE actual: 20,000
+
+   Duracion: 130.0 segundos
