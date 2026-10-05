@@ -7,25 +7,15 @@ USO MANUAL: correr cuando se quiera refrescar la tabla de descuentos.
 NO se ejecuta los martes con agentes.py.
 """
 
-import sys, os, uuid, json, time
+import sys, os, json, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from modules.database.conexion import ServiceLayerConnection
+from modules.database.conexion import (
+    ServiceLayerConnection,
+    ejecutar_sql_sl,
+)
 
 ARCHIVO_SALIDA = "descuentos.json"
-
-
-def ejecutar_sql_sl(conn, sql):
-    code = f"QU_DESC_{uuid.uuid4().hex[:8]}"
-    url = f"{conn.base_url}/SQLQueries"
-    resp = conn.session.post(
-        url, json={"SqlCode": code, "SqlName": "Descuentos", "SqlText": sql}
-    )
-    if resp.status_code not in (200, 201):
-        return []
-    res = conn.get(f"SQLQueries('{code}')/List", {})
-    conn.session.delete(f"{url}('{code}')")
-    return res.get("value", []) if res else []
 
 
 def obtener_clientes(conn):

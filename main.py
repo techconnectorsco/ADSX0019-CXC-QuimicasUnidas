@@ -19,12 +19,14 @@ from sharepoint_qu import SharePointUploader
 # Agregar path del proyecto
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from modules.database.conexion import ServiceLayerConnection
+from modules.database.conexion import (
+    ServiceLayerConnection,
+    ejecutar_sql_sl,
+)
 from generarpdf import generar_pdf_estado_cuenta
 from sendemailCXC import enviar_estado_cuenta
 from logcontrolcxc import ControlCXC
 from Generarexcel import generar_excel_estado_cuenta
-import uuid
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
@@ -253,31 +255,6 @@ def obtener_contacto_principal(
         pass
 
     return {"nombre": "", "telefono": "", "email": ""}
-
-
-def ejecutar_sql_sl(conn: ServiceLayerConnection, sql: str) -> List[Dict]:
-    """
-    Ejecuta un query SQL crudo en Service Layer mediante el endpoint SQLQueries.
-    Versión segura: Usa UUID para evitar conflictos de nombres en ejecuciones concurrentes.
-    """
-    code = f"QU_PR_{uuid.uuid4().hex[:8]}"
-    url = f"{conn.base_url}/SQLQueries"
-
-    # Crear la consulta con un nombre único temporal
-    resp = conn.session.post(
-        url, json={"SqlCode": code, "SqlName": "Query Temporal PR", "SqlText": sql}
-    )
-
-    if resp.status_code not in (200, 201):
-        return []
-
-    # Ejecutar y obtener resultados
-    res = conn.get(f"SQLQueries('{code}')/List", {})
-
-    # Limpiar inmediatamente la consulta de SAP
-    conn.session.delete(f"{url}('{code}')")
-
-    return res.get("value", []) if res else []
 
 
 def obtener_codigos_familia(conn: ServiceLayerConnection, card_code: str) -> List[str]:

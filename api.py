@@ -426,5 +426,64 @@ def config_gira_zona():
     }
 
 
+@app.get("/api/arbol-gira-zona")
+def arbol_gira_zona(agente: int, refrescar: int = 0):
+    """
+    El arbol de zonas y clientes de un agente, con la elegibilidad resuelta.
+
+    Solo lectura: NO encola nada, no toca cola_tareas_gira_zona ni ninguno de
+    los endpoints existentes. Misma disciplina que siguio el resto del modulo.
+
+    Reemplaza a obtenerArbolAgente() de sap.ts, que armaba el arbol con los
+    clientes cuya FICHA tenia SalesPersonCode = agente. Ese criterio no es el
+    del PDF, que rutea por U_CODV de la direccion del documento, y de ahi venia
+    el reclamo: la pantalla dejaba marcar clientes que nunca salian. Aca los
+    elegibles salen del mismo criterio del PDF.
+
+    El frontend debe proxear a este endpoint SIN fallback al arbol viejo: si
+    esto no responde, un error explicito es mejor que un arbol con el universo
+    equivocado.
+
+    ?refrescar=1 fuerza el recalculo. El cache dura 12 minutos (ver
+    GIRA_ZONA_CACHE_TTL_SEGS): el mapa es de toda la empresa y cuesta ~100s en
+    horario de oficina, asi que sin cache la pantalla es inusable.
+
+    OJO con los montos: son APROXIMADOS. La precision de /SQLQueries depende de
+    la sesion y redondea a 6 cifras significativas. La elegibilidad NO depende
+    del monto, sino del ruteo y del conteo de documentos, que salen exactos.
+    """
+    conn = ServiceLayerConnection(use_test_db=False)
+    if not conn.login():
+        return {
+            "error": "No se pudo conectar al Service Layer de SAP",
+            "agente": None,
+            "zonas": [],
+            "sinZona": [],
+        }
+
+    try:
+        return agentes.construir_arbol_gira_zona(
+            conn, agente, refrescar=bool(refrescar)
+        )
+    except ValueError as e:
+        # Agente que no existe: es culpa del pedido, no del servidor
+        return {"error": str(e), "agente": None, "zonas": [], "sinZona": []}
+    except RuntimeError as e:
+        # SAP no contesto o rechazo una consulta. Devolver un arbol vacio en
+        # silencio seria peor que el error: pareceria que el agente no tiene
+        # ningun cliente con carga.
+        return {
+            "error": f"SAP no devolvio los datos completos: {e}",
+            "agente": None,
+            "zonas": [],
+            "sinZona": [],
+        }
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8050)

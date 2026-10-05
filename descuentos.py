@@ -5,30 +5,14 @@ Explorador de Descuentos basado en el Historial de Facturas (INV1)
 
 import sys
 import os
-import uuid
 import json
 
 # Agregar path del proyecto
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from modules.database.conexion import ServiceLayerConnection
-
-
-def ejecutar_sql_sl(conn: ServiceLayerConnection, sql: str) -> list:
-    code = f"QU_PR_{uuid.uuid4().hex[:8]}"
-    url = f"{conn.base_url}/SQLQueries"
-
-    resp = conn.session.post(
-        url,
-        json={"SqlCode": code, "SqlName": "Query Explorador Invoices", "SqlText": sql},
-    )
-
-    if resp.status_code not in (200, 201):
-        print(f"❌ Error SQL: {resp.text}")
-        return []
-
-    res = conn.get(f"SQLQueries('{code}')/List", {})
-    conn.session.delete(f"{url}('{code}')")
-    return res.get("value", []) if res else []
+from modules.database.conexion import (
+    ServiceLayerConnection,
+    ejecutar_sql_sl,
+)
 
 
 def investigar():

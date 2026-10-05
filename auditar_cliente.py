@@ -9,24 +9,10 @@ import os
 # Agregar path del proyecto para importar la conexión
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from modules.database.conexion import ServiceLayerConnection
-import uuid
-
-
-def ejecutar_sql_sl(conn: ServiceLayerConnection, sql: str):
-    code = f"QU_AUDIT_{uuid.uuid4().hex[:8]}"
-    url = f"{conn.base_url}/SQLQueries"
-
-    resp = conn.session.post(
-        url,
-        json={"SqlCode": code, "SqlName": "Query Auditoria Temporal", "SqlText": sql},
-    )
-    if resp.status_code not in (200, 201):
-        return []
-
-    res = conn.get(f"SQLQueries('{code}')/List", {})
-    conn.session.delete(f"{url}('{code}')")
-    return res.get("value", []) if res else []
+from modules.database.conexion import (
+    ServiceLayerConnection,
+    ejecutar_sql_sl,
+)
 
 
 def investigar_cliente(card_code: str):

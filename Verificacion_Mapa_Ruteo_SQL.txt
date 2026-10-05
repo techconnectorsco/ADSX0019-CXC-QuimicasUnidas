@@ -1,0 +1,142 @@
+==============================================================================
+VALIDACION DEL MAPA DE RUTEO POR SQL - Paso 0 del prefiltro
+Quimicas Unidas / ADSX0019
+Fecha: 30/09/2026 23:54:56
+
+SOLO LECTURA de datos. GET + los POST/DELETE a /SQLQueries que son el
+mecanismo del Service Layer para correr SQL. No envia nada.
+==============================================================================
+
+Conectando a SAP PRODUCCION...
+
+==============================================================================
+PASO A - Los queries crudos
+==============================================================================
+
+   Agentes con correo en SAP: 3
+      6    | Siviany González
+      7    | Berny Marín Chavez
+      9    | José Chacón
+
+   OINV abiertas            :  1,091 filas (28.2s)
+   ORIN abiertas desde 2022 :     40 filas (24.5s)
+   JDT1 PR agrupadas        :    106 filas (24.3s)
+
+   Control de duplicados por el JOIN con CRD1:
+      OINV sin el join :  1,091
+      OINV con el join :  1,091
+      Sin duplicados.
+
+==============================================================================
+PASO B - El mapa, calculado en Python
+==============================================================================
+
+   El parser de /SQLQueries no acepta funciones ni aritmetica, asi
+   que el saldo, el signo y el ruteo se calculan aca, con las
+   mismas reglas de procesar_documento().
+
+   Documentos descartados por saldo < 0.005: 0
+   Pares (cliente, vendedor) antes de la regla del cero: 158
+   Pares elegibles por documentos: 158
+   Pares elegibles con las filas PR incluidas: 244
+
+==============================================================================
+PASO C - Fidelidad contra el oraculo (agentes.py)
+==============================================================================
+
+   El oraculo es obtener_documentos_cliente() importada tal cual: la
+   misma funcion que usa la gira real.
+
+   Trayendo el universo de clientes por OData (lento, ~350 llamadas)...
+   Universo de obtener_clientes_con_saldo(): 427 clientes
+   OCRD con CardType = 'C'                 : 8,036
+   -> NO coinciden. El filtro de OData recorta mas de lo que
+      replica el SQL; hay que mirarlo antes del Paso 1.
+
+   Clientes a verificar: 89 (hasta 12 por region y agente, mas los conocidos)
+
+   DISCREPANCIAS: 15 de 89
+
+   CLIENTE     AG   REGION    CAMPO  DETALLE
+   ----------------------------------------------------------------------
+   C0042       7    comun     CRC    SQL 286,223.42 vs Python 286,223.02
+   C0043       6    nuevo     CRC    SQL 169,657.00 vs Python 169,656.84
+   C0043       7    comun     CRC    SQL 78,050.40 vs Python 78,050.47
+   C0048       6    comun     CRC    SQL 2,604,150.22 vs Python 2,604,151.77
+   C0060       7    comun     CRC    SQL 250,189.80 vs Python 250,189.59
+   C0076       7    comun     CRC    SQL 187,149.90 vs Python 187,149.70
+   C0084       6    comun     CRC    SQL 1,815,457.40 vs Python 1,815,457.66
+   C0104       7    comun     CRC    SQL 1,246,459.72 vs Python 1,246,453.66
+   C0109       6    comun     CRC    SQL 278,507.27 vs Python 278,507.21
+   C0139       6    nuevo     CRC    SQL 415,995.20 vs Python 415,994.58
+   C0139       7    nuevo     CRC    SQL -105,256.59 vs Python -105,256.79
+   C0139       9    comun     CRC    SQL -384,031.68 vs Python -384,032.08
+   C0347       6    nuevo     CRC    SQL 2,339,670.30 vs Python 2,339,671.13
+   C0347       7    nuevo     CRC    SQL 6,068,214.00 vs Python 6,068,213.00
+   C0347       9    nuevo     CRC    SQL 5,611,652.10 vs Python 5,611,651.93
+
+   Casos documentados:
+      FALLA  C0042 / agente 7: SQL dice 49 docs, esperado 45
+      OK     C0037 / agente 9: SQL dice 0 docs, esperado 0 (omitido el 27/09/2026)
+      OK     C0080 / agente 9: SQL dice 0 docs, esperado 0 (omitido el 27/09/2026)
+      OK     C0121 / agente 9: SQL dice 0 docs, esperado 0 (omitido el 27/09/2026)
+
+==============================================================================
+PASO D - Forma del arbol nuevo
+==============================================================================
+
+   AG   AGENTE                 VIEJO   NUEVO  FALTAN  INUTIL  S/ZONA
+   ----------------------------------------------------------------------
+   6    Siviany González          59      49       8      18       0
+   7    Berny Marín Chavez        72      45       2      29       0
+   9    José Chacón               62      44       7      25       0
+
+   VIEJO  : lo que el arbol muestra hoy (SalesPersonCode de la ficha).
+   NUEVO  : clientes con carga real ruteada a ese agente.
+   FALTAN : estaban ausentes del arbol y si aportan al PDF.
+   INUTIL : el arbol los ofrece y no aportan nada.
+   S/ZONA : de los NUEVO, cuantos tienen U_ZGIRA vacio.
+
+==============================================================================
+PASO D-bis - Cuanta interfaz necesita el grupo 'sin zona'
+==============================================================================
+
+   Hoy sinZona esta siempre vacio y en la UI es un contador muerto
+   (girazonapanel.svelte:609-617). Si con el universo corregido deja
+   de estarlo, necesita lista propia y seleccionable.
+
+   Agente 6 - Siviany González
+      Ninguno sin zona: el grupo sigue vacio.
+   Agente 7 - Berny Marín Chavez
+      Ninguno sin zona: el grupo sigue vacio.
+   Agente 9 - José Chacón
+      Ninguno sin zona: el grupo sigue vacio.
+
+   Zonas en la UDT U_GIRAS: 19
+
+==============================================================================
+PASO E - Las filas PR, contra obtener_saldos_favor_masivo()
+==============================================================================
+
+   El oraculo del Paso C corre con saldos_favor_cache=None, asi que
+   las PR se validan aparte contra la funcion de produccion.
+
+   CLIENTE           SQL   PRODUCCION   ESTADO
+   ------------------------------------------------
+   C0040               9            9   OK
+   C0161               8            8   OK
+   C0048               5            5   OK
+   C0489               3            3   OK
+   CC10117             2            2   OK
+   CC1001999           2            2   OK
+   C0507               2            2   OK
+   C0475               2            2   OK
+
+==============================================================================
+VEREDICTO
+==============================================================================
+
+   NO PASA. El SQL no coincide con el Python; ver Paso C.
+   No seguir al Paso 1 hasta cerrar esas diferencias.
+
+   Duracion: 187.4 segundos
