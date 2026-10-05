@@ -43,7 +43,7 @@ MODO_PRUEBA = False  # True = envía a EMAIL_PRUEBA, False = envía al cliente r
 # Email para enviar el log de control (en producción: encargada de CXC)
 EMAIL_LOG_CONTROL = [
     "credito@qu.cr",
-    "devs@techconnectors.co",
+    "dev@soportexperto.com",
     "creditodenis@qu.cr",
     "asistente1@powermotorsca.com",
 ]
